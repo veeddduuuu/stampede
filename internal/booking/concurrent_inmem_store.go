@@ -7,7 +7,7 @@ import (
 
 type ConcurrentInmemRepository struct{
 	booking map[string]Booking
-	sync RWMutex
+	sync.RWMutex
 }
 
 func NewConcurrentInmemRepository() *ConcurrentInmemRepository{
