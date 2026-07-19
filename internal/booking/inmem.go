@@ -1,4 +1,4 @@
-package internal
+package booking
 
 import (
 	"errors"
@@ -15,10 +15,11 @@ func NewInmemRepository() *InmemRepository{
 }
 
 func (s *InmemRepository) Book(b Booking) error{
-	if _, exists := s.booking[b.ID]; exists{
-		return errors.New("booking already exists")
+	seatKey := b.EventID + "_" + b.SeatID
+	if _, exists := s.booking[seatKey]; exists{
+		return errors.New("seat is already booked for this event")
 	}
-	s.booking[b.ID] = b
+	s.booking[seatKey] = b
 	return nil
 }
 

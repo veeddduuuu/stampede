@@ -1,8 +1,8 @@
-package internal
+package booking
 
 type Booking struct {
 	ID      string
-	MovieID string
+	EventID string
 	SeatID  string
 	UserID  string
 	Status  string

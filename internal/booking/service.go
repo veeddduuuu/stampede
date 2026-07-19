@@ -1,4 +1,4 @@
-package internal
+package booking
 
 type Service struct{
 	book BookingRepository
@@ -15,3 +15,4 @@ func (s *Service) Book(b Booking) error{
 }
 
 
+ 
