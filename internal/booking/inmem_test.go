@@ -1,34 +1,41 @@
 package booking
 
 import (
+	"fmt"
 	"sync"
 	"testing"
+	"concurrent-seat-booking-system/internal/adapters/redis"
 )
 
-func TestInmemRepository_ConcurrentBookings(t *testing.T) {
-	repo := NewInmemRepository()
-	
+func TestRedisStore_ConcurrentBookings(t *testing.T) {
+	repo := NewRedisStore(redis.NewRedisClient("localhost:6379"))
+	defer repo.rbd.Close()
+
 	var wg sync.WaitGroup
-	// Launch 100 goroutines to concurrently book seats
+	start := make(chan struct{})
+
 	for i := 0; i < 100; i++ {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
 			
-			// Some might try to book the same ID, some different ones
-			// Let's use the same EventID and SeatID to simulate concurrency on the same resource
+			// Wait for the start signal so all 100 fire at the exact same time
+			<-start
+
 			b := Booking{
-				ID:      "booking-1", // They all try to book the same booking ID or different ones
+				ID:      fmt.Sprintf("booking-%d", i),
 				EventID: "event-1",
 				SeatID:  "seat-1",
-				UserID:  "user-1",
+				UserID:  fmt.Sprintf("user-%d", i),
 				Status:  "booked",
 			}
 			
-			// Even if they use different IDs, concurrent map writes will crash the program.
 			_ = repo.Book(b)
 		}(i)
 	}
+	
+	// Unblock all goroutines simultaneously
+	close(start)
 	
 	wg.Wait()
 }
