@@ -118,3 +118,64 @@ func (s *HybridStore) ListBookings(userID string) ([]Booking, error) {
 
 	return bookings, nil
 }
+
+func (s *HybridStore) ListEventBookings(eventID string) ([]Booking, error) {
+	ctx := context.Background()
+	var bookings []Booking
+
+	// 1. Fetch BOOKED seats from Postgres
+	query := `
+		SELECT id, event_id, seat_id, user_id, status
+		FROM bookings
+		WHERE event_id = $1
+	`
+	rows, err := s.pool.Query(ctx, query, eventID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var b Booking
+		if err := rows.Scan(&b.ID, &b.EventID, &b.SeatID, &b.UserID, &b.Status); err != nil {
+			return nil, err
+		}
+		bookings = append(bookings, b)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	// 2. Fetch HELD seats from Redis
+	// Using KEYS for simplicity, though SCAN is better for production
+	pattern := fmt.Sprintf("seat:%s:*", eventID)
+	keys, err := s.rds.Keys(ctx, pattern).Result()
+	if err != nil && err != redis.Nil {
+		return nil, err
+	}
+
+	if len(keys) > 0 {
+		values, err := s.rds.MGet(ctx, keys...).Result()
+		if err != nil && err != redis.Nil {
+			return nil, err
+		}
+		for _, val := range values {
+			if val == nil {
+				continue
+			}
+			strVal, ok := val.(string)
+			if !ok {
+				continue
+			}
+			var b Booking
+			if err := json.Unmarshal([]byte(strVal), &b); err == nil {
+				// We don't overwrite Status here because Hold already sets it to "HELD" before marshaling,
+				// but let's ensure it is set correctly just in case.
+				b.Status = "HELD"
+				bookings = append(bookings, b)
+			}
+		}
+	}
+
+	return bookings, nil
+}

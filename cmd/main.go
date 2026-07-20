@@ -85,8 +85,21 @@ func main() {
 		w.Write([]byte(`{"message": "booking successful"}`))
 	}).Methods(http.MethodPost)
 
+	r.HandleFunc("/events/{id}/seats", func(w http.ResponseWriter, r *http.Request) {
+		vars := mux.Vars(r)
+		eventID := vars["id"]
 
-	
+		seats, err := svc.ListSeats(eventID)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(seats); err != nil {
+			log.Printf("Error encoding response: %v", err)
+		}
+	}).Methods(http.MethodGet)
 	srv := &http.Server{
 		Addr:         ":8080",
 		Handler:      r,

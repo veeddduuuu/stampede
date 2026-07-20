@@ -13,7 +13,13 @@ type Booking struct {
 	ExpiresAt time.Time
 }
 
+type Seat struct {
+	ID     string `json:"id"`
+	Status string `json:"status"`
+}
+
 type BookingRepository interface {
 	Book(b Booking) error
 	ListBookings(id string) ([]Booking, error)
+	ListEventBookings(eventID string) ([]Booking, error)
 }
