@@ -12,7 +12,7 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-const defaultHoldTTL = 1200 * time.Millisecond
+const redisStoreTTL = 1200 * time.Millisecond
 
 type RedisStore struct {
 	rbd *redis.Client
@@ -40,7 +40,7 @@ func (s* RedisStore) Book(b Booking) error {
 func (s *RedisStore) hold(b Booking) (*Booking, error){
 	id:= uuid.New().String()
 	now:= time.Now()
-	expiresAt:= now.Add(defaultHoldTTL)
+	expiresAt:= now.Add(redisStoreTTL)
 	ctx := context.Background()
 	key:= fmt.Sprintf("seat:%s:%s", b.EventID, b.SeatID)
 	b.ID = id
@@ -48,7 +48,7 @@ func (s *RedisStore) hold(b Booking) (*Booking, error){
 
 	res:= s.rbd.SetArgs(ctx, key, val, redis.SetArgs{
 		Mode: "NX",
-		TTL: defaultHoldTTL,
+		TTL: redisStoreTTL,
 	})
 
 	ok:= res.Val() == "OK"

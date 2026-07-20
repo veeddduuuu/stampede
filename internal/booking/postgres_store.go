@@ -20,7 +20,7 @@ func NewPostgresStore(pool *pgxpool.Pool) *PostgresStore {
 func (s *PostgresStore) Book(b Booking) error {
 	ctx := context.Background()
 
-	// Start a transaction
+	// 1. Start a transaction
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return err
@@ -40,9 +40,12 @@ func (s *PostgresStore) Book(b Booking) error {
 		}
 		return err
 	}
+
+	// 4. Commit the transaction
 	return tx.Commit(ctx)
 }
 
+// ListBookings is a placeholder for the interface
 func (s *PostgresStore) ListBookings(id string) []Booking {
 	return nil
 }
