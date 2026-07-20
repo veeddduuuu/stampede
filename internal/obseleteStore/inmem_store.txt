@@ -1,4 +1,4 @@
-package booking
+package obseletestore
 
 import (
 	"errors"
@@ -27,6 +27,16 @@ func (s *InmemRepository) ListBookings(id string) ([]Booking, error) {
 	var result []Booking
 	for _, b := range s.booking {
 		if b.UserID == id {
+			result = append(result, b)
+		}
+	}
+	return result, nil
+}
+
+func (s *InmemRepository) ListEventBookings(eventID string) ([]Booking, error) {
+	var result []Booking
+	for _, b := range s.booking {
+		if b.EventID == eventID {
 			result = append(result, b)
 		}
 	}

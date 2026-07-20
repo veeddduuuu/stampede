@@ -1,4 +1,4 @@
-package booking
+package obseletestore
 
 import (
 	"fmt"
@@ -64,6 +64,10 @@ func TestConcurrentInmemStore_ConcurrentBookings(t *testing.T) {
 	
 	close(start)
 	wg.Wait()
+}
+
+func NewConcurrentInmemRepository() any {
+	panic("unimplemented")
 }
 
 func TestRedisStore_ConcurrentBookings(t *testing.T) {
