@@ -62,3 +62,40 @@ ok      concurrent-seat-booking-system/internal/booking 1.015s
 PASS
 ok      concurrent-seat-booking-system/internal/booking 1.045s
 ```
+
+## 4. Hybrid Store (Redis + Postgres) Latency Benchmark
+
+**Expected Result:** Postgres is faster for sequential requests due to fewer network hops.
+**Actual Result:** As expected, Postgres was ~0.35ms faster per request sequentially.
+
+```text
+=== RUN   TestLatencyComparison
+
+--- LATENCY BENCHMARK (50 sequential inserts) ---
+Postgres Store Average Latency: 1.250242ms
+Hybrid Store Average Latency:   1.608932ms
+--------------------------------------------------
+--- PASS: TestLatencyComparison (0.17s)
+PASS
+ok  	concurrent-seat-booking-system/internal/booking	0.181s
+```
+
+## 5. Hybrid Store (Redis + Postgres) Concurrency Test
+
+**Expected Result:** Pass (Exactly 1 success. Redis absorbs the vast majority of the concurrent stampede, protecting Postgres from double-booking lock contention).
+**Actual Result:** Pass
+
+```text
+=== RUN   TestHybridStoreConcurrency
+
+--- CONCURRENCY TEST (100 goroutines) ---
+Total Successes: 1
+Total Failures: 99
+Rejected by Redis: 97
+Rejected by Postgres: 2
+----------------------------------------
+--- PASS: TestHybridStoreConcurrency (0.08s)
+PASS
+ok  	concurrent-seat-booking-system/internal/booking	0.093s
+```
+

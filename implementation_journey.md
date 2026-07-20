@@ -90,11 +90,37 @@ Here is the actual proof from the test run, showing exactly one successful booki
 === RUN   TestRedisStore_ConcurrentBookings
 2026/07/20 03:34:22 Connected to Redis: localhost:6379
 2026/07/20 03:34:22 Booking held for user user-81: &{ID:74729599-97b2-4cb7-a018-a93cd9464217 EventID:event-1 SeatID:seat-1 UserID:user-81 Status:HELD ExpiresAt:2026-07-20 03:34:23.788297743 +0530 IST m=+1.207095369}
---- PASS: TestRedisStore_ConcurrentBookings (0.03s)
-PASS
-ok      concurrent-seat-booking-system/internal/booking 1.045s
-```
----
+## Phase 4: Persistent Storage (PostgreSQL & Redis)
 
-## Chapter 5: What's Next? (Idempotency)
-*(To be written when I tackle network retries and idempotency keys!)*
+**What we built:**
+We implemented two independent distributed storage layers to move state out of Go's volatile memory:
+1. **RedisStore:** Uses a Redis client to hold bookings, suitable for extremely fast, concurrent caching and locking.
+2. **PostgresStore:** Uses `pgxpool` with a minimum of 10 and maximum of 50 connections to handle relational ACID transactions. We also introduced a Docker Compose `migrate` service to auto-create the `bookings` table on startup.
+
+**How we solved Business Concurrency here:**
+Instead of relying on application-level Mutexes (which don't work across multiple servers), we pushed the concurrency checks to the database layer. 
+For PostgreSQL, we created a `UNIQUE(event_id, seat_id)` constraint in the schema. When 100 concurrent goroutines attempt to book the exact same seat, Postgres accepts the first `INSERT` and strictly rejects the other 99 with a `23505 Unique Violation` error.
+
+## Phase 5: The Hybrid Store (Redis + Postgres)
+
+While the independent Postgres and Redis stores worked, they each had flaws when standing alone:
+1. **Pure Postgres** can suffer under extreme concurrency (like a Taylor Swift ticket sale). 10,000 users clicking "Book" at once would result in 10,000 database transactions hitting Postgres simultaneously, fighting for row locks and burning up CPU, even if 9,999 of them are eventually rejected by the `UNIQUE` constraint.
+2. **Pure Redis** is fast, but it's fundamentally an in-memory datastore. It is not designed to be the single source of truth for permanent, relational, financial data like ticket bookings.
+
+**What we built:**
+We combined them into a `HybridStore`. When a user attempts to book a seat:
+1. The `HybridStore` attempts to acquire a short-lived lock (3 minutes) in Redis.
+2. If Redis rejects it, the request is killed instantly. Postgres is completely protected.
+3. If Redis grants the lock, the `HybridStore` opens a Postgres transaction to permanently save the booking.
+4. If the Postgres transaction fails, we delete the Redis lock to free the seat.
+
+**The Test Results:**
+We wrote a benchmark to compare them:
+- **Sequential Latency:** The pure Postgres store was slightly faster (~1.25ms vs ~1.60ms) because it only requires one network hop instead of two.
+- **High Concurrency (100 concurrent requests):** This is where the Hybrid Store shines. Out of 100 simultaneous requests for the exact same seat, Redis instantly blocked 97 of them. Only 3 requests made it through to Postgres, and Postgres safely rejected the remaining 2 duplicates. The database was almost completely shielded from the stampede!
+
+## Phase 6: The API & Infrastructure Layer (Pending)
+*(To be updated when we build the HTTP routers, Health checks, and Graceful Shutdown)*
+
+## Phase 7: Idempotency (Pending)
+*(To be updated when we handle network retries and idempotency keys)*
