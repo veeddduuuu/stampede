@@ -13,7 +13,7 @@ type Booking struct {
 	ExpiresAt time.Time
 }
 
-type BookingRepository interface{
+type BookingRepository interface {
 	Book(b Booking) error
-	ListBookings(id string) ([]Booking)
+	ListBookings(id string) ([]Booking, error)
 }

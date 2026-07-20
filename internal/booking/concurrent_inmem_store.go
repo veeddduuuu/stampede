@@ -27,14 +27,14 @@ func (s *ConcurrentInmemRepository) Book(b Booking) error{
 	return nil
 }
 
-func (s *ConcurrentInmemRepository) ListBookings(id string) ([]Booking){
+func (s *ConcurrentInmemRepository) ListBookings(id string) ([]Booking, error) {
 	s.RLock()
 	defer s.RUnlock()
 	var result []Booking
-	for _, b:= range s.booking{
-		if b.UserID == id{
+	for _, b := range s.booking {
+		if b.UserID == id {
 			result = append(result, b)
 		}
 	}
-	return result
+	return result, nil
 }

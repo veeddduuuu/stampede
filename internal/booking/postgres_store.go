@@ -45,7 +45,31 @@ func (s *PostgresStore) Book(b Booking) error {
 	return tx.Commit(ctx)
 }
 
-// ListBookings is a placeholder for the interface
-func (s *PostgresStore) ListBookings(id string) []Booking {
-	return nil
+func (s *PostgresStore) ListBookings(userID string) ([]Booking, error) {
+	ctx := context.Background()
+	query := `
+		SELECT id, event_id, seat_id, user_id, status
+		FROM bookings
+		WHERE user_id = $1
+	`
+	rows, err := s.pool.Query(ctx, query, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var bookings []Booking
+	for rows.Next() {
+		var b Booking
+		if err := rows.Scan(&b.ID, &b.EventID, &b.SeatID, &b.UserID, &b.Status); err != nil {
+			return nil, err
+		}
+		bookings = append(bookings, b)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return bookings, nil
 }

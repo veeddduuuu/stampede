@@ -65,3 +65,8 @@ func (s *RedisStore) hold(b Booking) (*Booking, error){
 		ExpiresAt: expiresAt,
 	}, nil
 }
+
+func (s *RedisStore) ListBookings(userID string) ([]Booking, error) {
+	// Not applicable for Redis locking layer, returns empty
+	return nil, nil
+}

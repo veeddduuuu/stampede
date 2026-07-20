@@ -89,3 +89,32 @@ func (s *HybridStore) Book(b Booking) error {
 	s.rds.Del(ctx, UniqueKey(held.EventID, held.SeatID))
 	return nil
 }
+
+func (s *HybridStore) ListBookings(userID string) ([]Booking, error) {
+	ctx := context.Background()
+	query := `
+		SELECT id, event_id, seat_id, user_id, status
+		FROM bookings
+		WHERE user_id = $1
+	`
+	rows, err := s.pool.Query(ctx, query, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var bookings []Booking
+	for rows.Next() {
+		var b Booking
+		if err := rows.Scan(&b.ID, &b.EventID, &b.SeatID, &b.UserID, &b.Status); err != nil {
+			return nil, err
+		}
+		bookings = append(bookings, b)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return bookings, nil
+}

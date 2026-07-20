@@ -23,12 +23,12 @@ func (s *InmemRepository) Book(b Booking) error{
 	return nil
 }
 
-func (s *InmemRepository) ListBookings(id string) ([]Booking){
+func (s *InmemRepository) ListBookings(id string) ([]Booking, error) {
 	var result []Booking
-	for _, b:= range s.booking{
-		if b.UserID == id{
+	for _, b := range s.booking {
+		if b.UserID == id {
 			result = append(result, b)
 		}
 	}
-	return result
+	return result, nil
 }
