@@ -5,6 +5,7 @@ import (
 	"sync"
 	"testing"
 	"concurrent-seat-booking-system/internal/adapters/redis"
+	"concurrent-seat-booking-system/internal/adapters/postgres"
 )
 
 func TestInmemStore_ConcurrentBookings(t *testing.T) {
@@ -88,6 +89,41 @@ func TestRedisStore_ConcurrentBookings(t *testing.T) {
 			}
 			
 			_ = repo.Book(b)
+		}(i)
+	}
+	
+	close(start)
+	wg.Wait()
+}
+
+func TestPostgresStore_ConcurrentBookings(t *testing.T) {
+	// Note: Postgres must be running via docker-compose
+	pool := postgres.NewPostgresPool()
+	defer pool.Close()
+	repo := NewPostgresStore(pool)
+
+	var wg sync.WaitGroup
+	start := make(chan struct{})
+
+	for i := 0; i < 100; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			
+			<-start
+
+			b := Booking{
+				ID:      fmt.Sprintf("booking-pg-%d", i),
+				EventID: "event-pg-1",
+				SeatID:  "seat-pg-1",
+				UserID:  fmt.Sprintf("user-%d", i),
+				Status:  "booked",
+			}
+			
+			err := repo.Book(b)
+			if err != nil && err.Error() != "seat is already booked for this event" {
+				t.Errorf("Unexpected error: %v", err)
+			}
 		}(i)
 	}
 	

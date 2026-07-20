@@ -13,3 +13,31 @@ services:
     restart: always
     environment:
       - REDIS_HOSTS=local:redis:6379
+
+  postgres:
+    container_name: postgres
+    image: postgres:16-alpine
+    ports:
+      - "5432:5432"
+    restart: always
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=postgres
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  migrate:
+    image: migrate/migrate
+    depends_on:
+      - postgres
+    volumes:
+      - ./migrations:/migrations
+    command:
+      - -path=/migrations
+      - -database=postgres://postgres:postgres@postgres:5432/postgres?sslmode=disable
+      - up
+    restart: on-failure
+
+volumes:
+  postgres_data:
