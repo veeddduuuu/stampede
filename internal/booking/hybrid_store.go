@@ -57,13 +57,27 @@ func (s *HybridStore) Hold(b Booking) (*Booking, error) {
 
 func (s *HybridStore) Book(b Booking) error {
 	ctx := context.Background()
-	held, err := s.Hold(b)
+	key := UniqueKey(b.EventID, b.SeatID)
+
+	val, err := s.rds.Get(ctx, key).Result()
 	if err != nil {
-		return fmt.Errorf("unable to hold seat the seat is already booked %w", err)
+		if err == redis.Nil {
+			return errors.New("seat hold expired or does not exist")
+		}
+		return fmt.Errorf("error checking hold in redis: %w", err)
 	}
+
+	var held Booking
+	if err := json.Unmarshal([]byte(val), &held); err != nil {
+		return fmt.Errorf("error parsing hold data: %w", err)
+	}
+
+	if held.UserID != b.UserID {
+		return errors.New("seat is held by another user")
+	}
+
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
-		s.rds.Del(ctx, UniqueKey(held.EventID, held.SeatID))
 		return fmt.Errorf("unable to begin transaction %w", err)	
 	}
 	defer tx.Rollback(ctx)
@@ -71,9 +85,8 @@ func (s *HybridStore) Book(b Booking) error {
 		INSERT INTO bookings (id, event_id, seat_id, user_id, status)
 		VALUES ($1, $2, $3, $4, $5)
 	`
-	_, err = tx.Exec(ctx, query, held.ID, held.EventID, held.SeatID, held.UserID, held.Status) 
+	_, err = tx.Exec(ctx, query, held.ID, held.EventID, held.SeatID, held.UserID, "BOOKED") 
 	if err != nil {
-		s.rds.Del(ctx, UniqueKey(held.EventID, held.SeatID))
 		// Check if the error is a Postgres Unique Violation (code 23505)
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
@@ -83,10 +96,9 @@ func (s *HybridStore) Book(b Booking) error {
 	}
 	err = tx.Commit(ctx)
 	if err != nil {
-		s.rds.Del(ctx, UniqueKey(held.EventID, held.SeatID))
 		return err
 	}
-	s.rds.Del(ctx, UniqueKey(held.EventID, held.SeatID))
+	s.rds.Del(ctx, key)
 	return nil
 }
 
@@ -178,4 +190,28 @@ func (s *HybridStore) ListEventBookings(eventID string) ([]Booking, error) {
 	}
 
 	return bookings, nil
+}
+
+func (s *HybridStore) Release(b Booking) (*Booking, error) {
+	ctx := context.Background()
+	key := UniqueKey(b.EventID, b.SeatID)
+	val, err := s.rds.Get(ctx, key).Result()
+	if err != nil {
+		return nil, err
+	}
+	if val == "" {
+		return nil, errors.New("seat is not on hold")
+	}
+	err = s.rds.Del(ctx, key).Err()
+	if err != nil {
+		return nil, err
+	}
+	return &Booking{
+		ID:        b.ID,
+		EventID:   b.EventID,
+		SeatID:    b.SeatID,
+		UserID:    b.UserID,
+		Status:    "AVAILABLE",
+		ExpiresAt: b.ExpiresAt,
+	}, nil
 }

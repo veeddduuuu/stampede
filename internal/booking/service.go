@@ -26,6 +26,10 @@ func (s *Service) ListBookings(userID string) ([]Booking, error) {
 	return s.book.ListBookings(userID)
 }
 
+func (s *Service) Release(b Booking) (*Booking, error) {
+	return s.book.Release(b)
+}
+
 func (s *Service) ListSeats(eventID string) ([]Seat, error) {
 	// Generate the default 100 seats
 	seats := make([]Seat, 100)

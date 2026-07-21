@@ -132,3 +132,49 @@ func (h *APIHandler) listSeats(w http.ResponseWriter, r *http.Request) {
 		log.Printf("Error encoding response: %v", err)
 	}
 }
+
+func (h *APIHandler) releaseSeat(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	eventID := vars["id"]
+
+	var req struct {
+		SeatID string `json:"seat_id"`
+		UserID string `json:"user_id"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request payload", http.StatusBadRequest)
+		return
+	}
+
+	b := booking.Booking{
+		EventID: eventID,
+		SeatID:  req.SeatID,
+		UserID:  req.UserID,
+	}
+
+	held, err := h.svc.Release(b)
+	if err != nil {
+		if err.Error() == "seat is not on hold" {
+			http.Error(w, err.Error(), http.StatusConflict)
+		} else {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+		}
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	
+	resp := struct {
+		Message   string `json:"message"`
+		ExpiresAt string `json:"expires_at"`
+	}{
+		Message:   "seat released successfully",
+		ExpiresAt: held.ExpiresAt.Format(time.RFC3339),
+	}
+	
+	if err := json.NewEncoder(w).Encode(resp); err != nil {
+		log.Printf("Error encoding response: %v", err)
+	}
+}

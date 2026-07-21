@@ -23,4 +23,5 @@ type BookingRepository interface {
 	ListBookings(id string) ([]Booking, error)
 	ListEventBookings(eventID string) ([]Booking, error)
 	Hold(b Booking) (*Booking, error)
+	Release(b Booking) (*Booking, error)
 }
