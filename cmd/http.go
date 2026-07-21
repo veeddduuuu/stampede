@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"time"
 
 	"github.com/gorilla/mux"
 )
@@ -68,6 +69,52 @@ func (h *APIHandler) bookSeat(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	w.Write([]byte(`{"message": "booking successful"}`))
+}
+
+func (h *APIHandler) holdSeat(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	eventID := vars["id"]
+
+	var req struct {
+		SeatID string `json:"seat_id"`
+		UserID string `json:"user_id"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request payload", http.StatusBadRequest)
+		return
+	}
+
+	b := booking.Booking{
+		EventID: eventID,
+		SeatID:  req.SeatID,
+		UserID:  req.UserID,
+	}
+
+	held, err := h.svc.Hold(b)
+	if err != nil {
+		if err.Error() == "seat already booked" || err.Error() == "seat is already booked for this event" {
+			http.Error(w, err.Error(), http.StatusConflict)
+		} else {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+		}
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	
+	resp := struct {
+		Message   string `json:"message"`
+		ExpiresAt string `json:"expires_at"`
+	}{
+		Message:   "seat held successfully",
+		ExpiresAt: held.ExpiresAt.Format(time.RFC3339),
+	}
+	
+	if err := json.NewEncoder(w).Encode(resp); err != nil {
+		log.Printf("Error encoding response: %v", err)
+	}
 }
 
 func (h *APIHandler) listSeats(w http.ResponseWriter, r *http.Request) {

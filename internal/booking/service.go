@@ -18,6 +18,10 @@ func (s *Service) Book(b Booking) error {
 	return s.book.Book(b)	
 }
 
+func (s *Service) Hold(b Booking) (*Booking, error) {
+	return s.book.Hold(b)
+}
+
 func (s *Service) ListBookings(userID string) ([]Booking, error) {
 	return s.book.ListBookings(userID)
 }

@@ -22,6 +22,7 @@ func setupRouter(svc *booking.Service) *mux.Router {
 	r.HandleFunc("/healthz", h.healthz).Methods(http.MethodGet)
 	r.HandleFunc("/users/{id}/bookings", h.listBookings).Methods(http.MethodGet)
 	r.HandleFunc("/events/{id}/book", h.bookSeat).Methods(http.MethodPost)
+	r.HandleFunc("/events/{id}/hold", h.holdSeat).Methods(http.MethodPost)
 	r.HandleFunc("/events/{id}/seats", h.listSeats).Methods(http.MethodGet)
 
 	return r
