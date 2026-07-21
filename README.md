@@ -8,11 +8,11 @@ The system is designed to handle a high volume of concurrent booking requests wh
 
 ```mermaid
 graph TD
-    User[User (Browser)] --> Frontend[React / Vite Frontend]
-    Frontend --> API[Go API / cmd]
-    API --> Core[Booking Core Logic / internal]
-    Core -- Caching / Locks --> Redis[(Redis)]
-    Core -- Persistent Storage --> DB[(PostgreSQL)]
+    User["User (Browser)"] --> Frontend["React / Vite Frontend"]
+    Frontend --> API["Go API / cmd"]
+    API --> Core["Booking Core Logic / internal"]
+    Core -- "Caching / Locks" --> Redis[("Redis")]
+    Core -- "Persistent Storage" --> DB[("PostgreSQL")]
 ```
 
 ## Tech Stack
