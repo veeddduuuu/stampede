@@ -24,6 +24,7 @@ func setupRouter(svc *booking.Service) *mux.Router {
 	r.HandleFunc("/events/{id}/book", h.bookSeat).Methods(http.MethodPost)
 	r.HandleFunc("/events/{id}/hold", h.holdSeat).Methods(http.MethodPost)
 	r.HandleFunc("/events/{id}/seats", h.listSeats).Methods(http.MethodGet)
+	r.HandleFunc("/events/{id}/release", h.releaseSeat).Methods(http.MethodPost)
 
 	return r
 }
@@ -33,7 +34,11 @@ func main() {
 	pool := postgres.NewPostgresPool()
 	defer pool.Close()
 
-	rds := redis.NewRedisClient("localhost:6379")
+	redisAddr := os.Getenv("REDIS_ADDR")
+	if redisAddr == "" {
+		redisAddr = "localhost:6379"
+	}
+	rds := redis.NewRedisClient(redisAddr)
 	defer rds.Close()
 
 	repo := booking.NewHybridStore(pool, rds)

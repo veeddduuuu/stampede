@@ -8,9 +8,12 @@ import(
 )
 
 // We use the docker-compose credentials you set up
-const connStr = "postgres://postgres:postgres@localhost:5432/postgres?sslmode=disable"
+var connStr = "postgres://postgres:postgres@localhost:5432/postgres?sslmode=disable"
 
 func NewPostgresPool() *pgxpool.Pool {
+	if envURL := os.Getenv("POSTGRES_URL"); envURL != "" {
+		connStr = envURL
+	}
 	config, err := pgxpool.ParseConfig(connStr)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Unable to parse connection string: %v\n", err)

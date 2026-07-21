@@ -58,10 +58,11 @@ func (h *APIHandler) bookSeat(w http.ResponseWriter, r *http.Request) {
 
 	err := h.svc.Book(b)
 	if err != nil {
-		if err.Error() == "seat is already booked for this event" || err.Error() == "seat already booked" {
-			http.Error(w, err.Error(), http.StatusConflict)
+		errMsg := err.Error()
+		if errMsg == "seat is already booked for this event" || errMsg == "seat hold expired or does not exist" || errMsg == "seat is held by another user" {
+			http.Error(w, errMsg, http.StatusConflict)
 		} else {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			http.Error(w, errMsg, http.StatusInternalServerError)
 		}
 		return
 	}
