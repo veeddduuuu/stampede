@@ -1,0 +1,87 @@
+package main
+
+import (
+	"concurrent-seat-booking-system/internal/booking"
+	"encoding/json"
+	"log"
+	"net/http"
+
+	"github.com/gorilla/mux"
+)
+
+type APIHandler struct {
+	svc *booking.Service
+}
+
+
+func (h *APIHandler) healthz(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte("OK"))
+}
+
+func (h *APIHandler) listBookings(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	userID := vars["id"]
+
+	bookings, err := h.svc.ListBookings(userID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(bookings); err != nil {
+		log.Printf("Error encoding response: %v", err)
+	}
+}
+
+func (h *APIHandler) bookSeat(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	eventID := vars["id"]
+
+	var req struct {
+		SeatID string `json:"seat_id"`
+		UserID string `json:"user_id"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request payload", http.StatusBadRequest)
+		return
+	}
+
+	b := booking.Booking{
+		EventID: eventID,
+		SeatID:  req.SeatID,
+		UserID:  req.UserID,
+	}
+
+	err := h.svc.Book(b)
+	if err != nil {
+		if err.Error() == "seat is already booked for this event" || err.Error() == "seat already booked" {
+			http.Error(w, err.Error(), http.StatusConflict)
+		} else {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+		}
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	w.Write([]byte(`{"message": "booking successful"}`))
+}
+
+func (h *APIHandler) listSeats(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	eventID := vars["id"]
+
+	seats, err := h.svc.ListSeats(eventID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(seats); err != nil {
+		log.Printf("Error encoding response: %v", err)
+	}
+}

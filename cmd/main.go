@@ -5,7 +5,6 @@ import (
 	"concurrent-seat-booking-system/internal/adapters/redis"
 	"concurrent-seat-booking-system/internal/booking"
 	"context"
-	"encoding/json"
 	"log"
 	"net/http"
 	"os"
@@ -15,6 +14,18 @@ import (
 
 	"github.com/gorilla/mux"
 )
+
+func setupRouter(svc *booking.Service) *mux.Router {
+	h := &APIHandler{svc: svc}
+	r := mux.NewRouter()
+
+	r.HandleFunc("/healthz", h.healthz).Methods(http.MethodGet)
+	r.HandleFunc("/users/{id}/bookings", h.listBookings).Methods(http.MethodGet)
+	r.HandleFunc("/events/{id}/book", h.bookSeat).Methods(http.MethodPost)
+	r.HandleFunc("/events/{id}/seats", h.listSeats).Methods(http.MethodGet)
+
+	return r
+}
 
 func main() {
 	_ = context.Background()
@@ -27,79 +38,7 @@ func main() {
 	repo := booking.NewHybridStore(pool, rds)
 	svc := booking.NewService(repo)
 
-	r := mux.NewRouter()
-
-	r.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("OK"))
-	}).Methods(http.MethodGet)
-
-	r.HandleFunc("/users/{id}/bookings", func(w http.ResponseWriter, r *http.Request) {
-		vars := mux.Vars(r)
-		userID := vars["id"]
-
-		bookings, err := svc.ListBookings(userID)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-
-		w.Header().Set("Content-Type", "application/json")
-		if err := json.NewEncoder(w).Encode(bookings); err != nil {
-			log.Printf("Error encoding response: %v", err)
-		}
-	}).Methods(http.MethodGet)
-
-	r.HandleFunc("/events/{id}/book", func(w http.ResponseWriter, r *http.Request) {
-		vars := mux.Vars(r)
-		eventID := vars["id"]
-
-		var req struct {
-			SeatID string `json:"seat_id"`
-			UserID string `json:"user_id"`
-		}
-
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			http.Error(w, "Invalid request payload", http.StatusBadRequest)
-			return
-		}
-
-		b := booking.Booking{
-			EventID: eventID,
-			SeatID:  req.SeatID,
-			UserID:  req.UserID,
-		}
-
-		err := svc.Book(b)
-		if err != nil {
-			if err.Error() == "seat is already booked for this event" || err.Error() == "seat already booked" {
-				http.Error(w, err.Error(), http.StatusConflict)
-			} else {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
-			}
-			return
-		}
-
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusCreated)
-		w.Write([]byte(`{"message": "booking successful"}`))
-	}).Methods(http.MethodPost)
-
-	r.HandleFunc("/events/{id}/seats", func(w http.ResponseWriter, r *http.Request) {
-		vars := mux.Vars(r)
-		eventID := vars["id"]
-
-		seats, err := svc.ListSeats(eventID)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-
-		w.Header().Set("Content-Type", "application/json")
-		if err := json.NewEncoder(w).Encode(seats); err != nil {
-			log.Printf("Error encoding response: %v", err)
-		}
-	}).Methods(http.MethodGet)
+	r := setupRouter(svc)
 	srv := &http.Server{
 		Addr:         ":8080",
 		Handler:      r,
@@ -127,7 +66,7 @@ func main() {
 	defer cancel()
 
 	if err := srv.Shutdown(ctx); err != nil {
-		log.Fatal("Server forced to shutdown:", err)
+		log.Printf("Server forced to shutdown: %v", err)
 	}
 
 	log.Println("Server exiting")
