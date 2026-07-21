@@ -13,15 +13,13 @@
   --chakra-blue: #000080;
 
   /* Seat states */
-  --seat-available: #1e293b;
-  --seat-available-border: rgba(255, 255, 255, 0.08);
-  --seat-available-hover: #334155;
-  --seat-held: rgba(255, 153, 51, 0.15);
-  --seat-held-border: rgba(255, 153, 51, 0.4);
-  --seat-booked: rgba(239, 68, 68, 0.12);
-  --seat-booked-border: rgba(239, 68, 68, 0.4);
-  --seat-selected: rgba(34, 197, 94, 0.15);
-  --seat-selected-border: rgba(34, 197, 94, 0.6);
+  --seat-available: #2a2d35;
+  --seat-available-border: rgba(255, 255, 255, 0.1);
+  --seat-available-hover: #3a3d45;
+  --seat-held: rgba(255, 153, 51, 0.18);
+  --seat-held-border: rgba(255, 153, 51, 0.5);
+  --seat-booked: rgba(34, 197, 94, 0.15);
+  --seat-booked-border: rgba(34, 197, 94, 0.5);
 
   /* Glass */
   --glass-bg: rgba(15, 23, 42, 0.8);
@@ -167,11 +165,6 @@ body {
   border-color: var(--seat-booked-border);
 }
 
-.status-dot.selected {
-  background: var(--seat-selected);
-  border-color: var(--seat-selected-border);
-}
-
 .backend-pill {
   padding: 0.3rem 0.8rem;
   border-radius: 999px;
@@ -260,9 +253,9 @@ body {
   user-select: none;
 }
 
-.seat:hover:not(.booked):not(.held) {
+.seat:hover:not(.booked):not(.held):not(.mine) {
   background: var(--seat-available-hover);
-  border-color: rgba(255, 255, 255, 0.15);
+  border-color: rgba(255, 255, 255, 0.2);
   transform: scale(1.08);
   z-index: 2;
 }
@@ -275,33 +268,40 @@ body {
   animation: held-pulse 2s ease-in-out infinite;
 }
 
+.seat.mine {
+  background: rgba(255, 153, 51, 0.25);
+  border-color: var(--saffron);
+  color: var(--saffron);
+  cursor: default;
+  transform: scale(1.1);
+  box-shadow: 0 0 16px 4px rgba(255, 153, 51, 0.2);
+  z-index: 2;
+  animation: mine-pulse 1.5s ease-in-out infinite;
+}
+
 @keyframes held-pulse {
   0%, 100% { box-shadow: 0 0 0 0 rgba(255, 153, 51, 0); }
   50% { box-shadow: 0 0 8px 2px rgba(255, 153, 51, 0.15); }
 }
 
+@keyframes mine-pulse {
+  0%, 100% { box-shadow: 0 0 12px 4px rgba(255, 153, 51, 0.15); }
+  50% { box-shadow: 0 0 20px 6px rgba(255, 153, 51, 0.3); }
+}
+
 .seat.booked {
   background: var(--seat-booked);
   border-color: var(--seat-booked-border);
-  color: rgba(239, 68, 68, 0.6);
+  color: #22c55e;
   cursor: not-allowed;
 }
 
 .seat.booked::after {
-  content: '×';
+  content: '✓';
   position: absolute;
-  font-size: 1.2rem;
-  color: rgba(239, 68, 68, 0.4);
+  font-size: 1rem;
+  color: rgba(34, 197, 94, 0.6);
   font-weight: 700;
-}
-
-.seat.selected {
-  background: var(--seat-selected);
-  border-color: var(--seat-selected-border);
-  color: #22c55e;
-  transform: scale(1.1);
-  box-shadow: 0 0 16px 4px rgba(34, 197, 94, 0.2);
-  z-index: 2;
 }
 
 /* Row labels */
@@ -330,7 +330,7 @@ body {
   display: flex;
   align-items: center;
   gap: 1.5rem;
-  box-shadow: var(--glass-shadow), 0 0 40px rgba(34, 197, 94, 0.1);
+  box-shadow: var(--glass-shadow), 0 0 40px rgba(255, 153, 51, 0.1);
   z-index: 100;
   transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1);
   min-width: 400px;
@@ -368,7 +368,7 @@ body {
 .ttl-bar-fill {
   height: 100%;
   border-radius: 999px;
-  background: linear-gradient(90deg, #22c55e, #ff9933, #ef4444);
+  background: linear-gradient(90deg, var(--saffron), #ef4444);
   transition: width 1s linear;
 }
 
@@ -552,9 +552,9 @@ body {
   font-weight: 700;
 }
 
-.counter-value.available-count { color: var(--text-primary); }
+.counter-value.available-count { color: #9ca3af; }
 .counter-value.held-count { color: var(--saffron); }
-.counter-value.booked-count { color: #ef4444; }
+.counter-value.booked-count { color: #22c55e; }
 
 .counter-label {
   font-size: 0.7rem;

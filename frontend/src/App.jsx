@@ -6,14 +6,20 @@ const EVENT_ID = 'modiji-meetup-2026'
 const POLL_INTERVAL = 2000 // 2 seconds
 const TTL_DURATION = 30 // seconds (should match backend hold TTL)
 
+// Generate 100 default seats so the grid always renders even if backend is offline
+const DEFAULT_SEATS = Array.from({ length: 100 }, (_, i) => ({
+  id: String(i + 1),
+  status: 'AVAILABLE',
+}))
+
 function App() {
-  const [seats, setSeats] = useState([])
+  const [seats, setSeats] = useState(DEFAULT_SEATS)
   const [userId, setUserId] = useState('user-' + Math.random().toString(36).slice(2, 6))
   const [selectedSeat, setSelectedSeat] = useState(null)
   const [holdExpiry, setHoldExpiry] = useState(null)
   const [ttlRemaining, setTtlRemaining] = useState(0)
   const [backendStatus, setBackendStatus] = useState('checking')
-  const [loading, setLoading] = useState(true)
+  const [loading, setLoading] = useState(false)
   const [actionLoading, setActionLoading] = useState(false)
   const [toasts, setToasts] = useState([])
   const toastIdRef = useRef(0)
@@ -181,7 +187,7 @@ function App() {
 
   // ── Seat class helper ───────────────────────────────
   const getSeatClass = (seat) => {
-    if (seat.id === selectedSeat) return 'seat selected'
+    if (seat.id === selectedSeat) return 'seat mine'
     switch (seat.status) {
       case 'HELD': return 'seat held'
       case 'BOOKED': return 'seat booked'
@@ -246,10 +252,6 @@ function App() {
           <span className="status-dot booked" />
           Booked
         </div>
-        <div className="status-indicator">
-          <span className="status-dot selected" />
-          Your Pick
-        </div>
         <div className={`backend-pill ${backendStatus === 'online' ? 'online' : 'offline'}`}>
           ● API {backendStatus}
         </div>
@@ -305,7 +307,7 @@ function App() {
                 onClick={() => handleSeatClick(seat)}
                 title={`Seat ${label} — ${seat.id === selectedSeat ? 'YOUR PICK' : seat.status}`}
               >
-                {seat.status !== 'BOOKED' && label}
+                {label}
               </div>
             )
           })}

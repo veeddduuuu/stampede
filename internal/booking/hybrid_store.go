@@ -36,7 +36,17 @@ func (s *HybridStore) Hold(b Booking) (*Booking, error) {
 	id := uuid.New().String()
 	now := time.Now()
 	expiresAt := now.Add(defaultHoldTTL)
-	val, _ := json.Marshal(b)
+
+	held := Booking{
+		ID:        id,
+		UserID:    b.UserID,
+		SeatID:    b.SeatID,
+		EventID:   b.EventID,
+		Status:    "HELD",
+		ExpiresAt: expiresAt,
+	}
+
+	val, _ := json.Marshal(held)
 	res := s.rds.SetArgs(ctx, UniqueKey(b.EventID, b.SeatID), val, redis.SetArgs{
 		Mode: "NX",
 		TTL:  defaultHoldTTL,
@@ -45,14 +55,7 @@ func (s *HybridStore) Hold(b Booking) (*Booking, error) {
 	if !ok {
 		return nil, errors.New("seat already booked")
 	}
-	return &Booking{
-		ID:        id,
-		UserID:    b.UserID,
-		SeatID:    b.SeatID,
-		EventID:   b.EventID,
-		Status:    "HELD",
-		ExpiresAt: expiresAt,
-	}, nil
+	return &held, nil
 }
 
 func (s *HybridStore) Book(b Booking) error {

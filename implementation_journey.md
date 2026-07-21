@@ -119,8 +119,63 @@ We wrote a benchmark to compare them:
 - **Sequential Latency:** The pure Postgres store was slightly faster (~1.25ms vs ~1.60ms) because it only requires one network hop instead of two.
 - **High Concurrency (100 concurrent requests):** This is where the Hybrid Store shines. Out of 100 simultaneous requests for the exact same seat, Redis instantly blocked 97 of them. Only 3 requests made it through to Postgres, and Postgres safely rejected the remaining 2 duplicates. The database was almost completely shielded from the stampede!
 
-## Phase 6: The API & Infrastructure Layer (Pending)
-*(To be updated when we build the HTTP routers, Health checks, and Graceful Shutdown)*
+## Phase 6: The API Layer
+I built the HTTP API using `gorilla/mux`, fleshing out the core endpoints: `GET /healthz`, `GET /events/{id}/seats`, `POST /events/{id}/hold`, `POST /events/{id}/book`, `POST /events/{id}/release`, and `GET /users/{id}/bookings`. 
+The `ListSeats` endpoint turned out quite clever. Instead of storing 100 empty seats in the database, it generates 100 virtual seats server-side on the fly, and then overlays the booking status from Postgres (for `BOOKED` seats) and Redis (for `HELD` seats). 
 
-## Phase 7: Idempotency (Pending)
+We also implemented graceful shutdown with SIGINT/SIGTERM handling, so the server can finish processing active requests before dying. Finally, I Dockerized everything using a multi-stage Go build. Our `docker-compose` setup is a thing of beauty: `api`, `frontend`, `postgres`, `redis`, `redis-commander`, and `migrate` services all spring to life with a single `docker compose up`. The entire system online in seconds!
+
+## Phase 7: The Frontend — "Modiji Meetup 2026"
+For the frontend, we went with React 19 and Vite 8, keeping it deliberately minimal but visually loud. 
+
+The seat map is a 10×10 grid (rows A-J). It uses just three colors: grey for available, orange for held, and green for booked. 
+The click flow is intuitive: click a grey seat, it sends a `POST hold`, and the seat turns orange with a slick TTL countdown bar. Click "Confirm", it sends a `POST book`, and the seat turns green. Click "Release", it sends a `POST release`, and it goes back to grey.
+
+The client polls `GET /events/{id}/seats` every 2 seconds. A cool trick we used is that it renders the 100 default seats client-side even if the backend is temporarily offline, so the grid is always visible. 
+
+Thematically, I went over-the-top: a saffron/Indian tricolor theme with an animated gradient title, a floating flag emoji, and a stage label for the "Modiji Meetup 2026". 
+
+The real magic happened when we opened two browser tabs side-by-side to test real-time polling. One user holds a seat, and boom—the other tab shows it orange within 2 seconds. It felt incredibly satisfying.
+
+## Phase 8: The Ghost Booking Bug
+This was our crown jewel bug. I have to tell you, it drove us crazy for a while.
+
+The bug was lurking in `hybrid_store.go`. Our `Hold()` function generated a fresh UUID (`id := uuid.New().String()`), but then we marshaled the *ORIGINAL* input `b` (which had NO ID) into Redis: 
+`val, _ := json.Marshal(b)`
+The brand new UUID was only ever used in the return value, not actually stored in Redis!
+
+So Redis gleefully stored this: 
+`{"ID":"", "EventID":"...", "SeatID":"...", "UserID":"..."}`
+
+When `Book()` read the hold back from Redis, it got `held.ID = ""`. It then blindly tried to execute:
+`INSERT INTO bookings (id, ...) VALUES ('', ...)`
+
+The FIRST booking with an empty ID succeeded (because `""` is technically unique as a PRIMARY KEY). But EVERY subsequent booking attempt *ALSO* had `held.ID = ""`, hitting the `id VARCHAR(255) PRIMARY KEY` constraint — NOT the `UNIQUE(event_id, seat_id)` constraint we carefully designed for.
+
+The error message bubbled up as "seat is already booked for this event" (because we lazily mapped ALL Postgres 23505 errors to that message), but the *ACTUAL* constraint being violated was the PRIMARY KEY collision on the empty string!
+
+The fix was just one structural change.
+
+Before (buggy):
+```go
+id := uuid.New().String()
+val, _ := json.Marshal(b)  // b has no ID!
+res := s.rds.SetArgs(ctx, key, val, ...)
+return &Booking{ID: id, ...}, nil  // ID only in return, not in Redis
+```
+
+After (fixed):
+```go
+id := uuid.New().String()
+held := Booking{ID: id, UserID: b.UserID, EventID: b.EventID, SeatID: b.SeatID}
+val, _ := json.Marshal(held)  // held HAS the ID
+res := s.rds.SetArgs(ctx, key, val, ...)
+return &held, nil
+```
+
+The dramatic irony? The system was designed to prevent double bookings via atomic operations and strict unique constraints. Instead, a simple serialization oversight created GHOST bookings — invisible phantom records with empty IDs that blocked ALL future bookings. Every new booking looked like a duplicate to Postgres, but none of them were actually duplicates of each other.
+
+We only discovered it by querying Postgres and finding a single row staring back at us with `id = ''`. The ghost in the machine.
+
+## Phase 9: Idempotency (Pending)
 *(To be updated when we handle network retries and idempotency keys)*
