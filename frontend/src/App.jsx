@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import './index.css'
 
-const API_BASE = ''
+const API_BASE = import.meta.env.VITE_API_BASE || ''
 const EVENT_ID = 'modiji-meetup-2026'
 const POLL_INTERVAL = 2000 // 2 seconds
 const TTL_DURATION = 30 // seconds (should match backend hold TTL)

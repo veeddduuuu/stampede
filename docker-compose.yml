@@ -14,55 +14,14 @@ services:
     environment:
       - REDIS_HOSTS=local:redis:6379
 
-  postgres:
-    container_name: postgres
-    image: postgres:16-alpine
-    ports:
-      - "5432:5432"
-    restart: always
-    environment:
-      - POSTGRES_USER=postgres
-      - POSTGRES_PASSWORD=postgres
-      - POSTGRES_DB=postgres
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-
-  migrate:
-    image: migrate/migrate
-    depends_on:
-      - postgres
-    volumes:
-      - ./migrations:/migrations
-    command:
-      - -path=/migrations
-      - -database=postgres://postgres:postgres@postgres:5432/postgres?sslmode=disable
-      - up
-    restart: on-failure
-
   api:
     build: .
     container_name: api
     ports:
       - "8080:8080"
     depends_on:
-      - postgres
       - redis
-      - migrate
     environment:
-      - POSTGRES_URL=postgres://postgres:postgres@postgres:5432/postgres?sslmode=disable
+      - POSTGRES_URL=${POSTGRES_URL}
       - REDIS_ADDR=redis:6379
     restart: always
-
-  frontend:
-    build: ./frontend
-    container_name: frontend
-    ports:
-      - "5173:5173"
-    depends_on:
-      - api
-    environment:
-      - VITE_API_URL=http://api:8080
-    restart: always
-
-volumes:
-  postgres_data:
