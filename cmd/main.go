@@ -11,23 +11,9 @@ import (
 	"os/signal"
 	"syscall"
 	"time"
-
-	"github.com/gorilla/mux"
 )
 
-func setupRouter(svc *booking.Service) *mux.Router {
-	h := &APIHandler{svc: svc}
-	r := mux.NewRouter()
 
-	r.HandleFunc("/healthz", h.healthz).Methods(http.MethodGet)
-	r.HandleFunc("/users/{id}/bookings", h.listBookings).Methods(http.MethodGet)
-	r.HandleFunc("/events/{id}/book", h.bookSeat).Methods(http.MethodPost)
-	r.HandleFunc("/events/{id}/hold", h.holdSeat).Methods(http.MethodPost)
-	r.HandleFunc("/events/{id}/seats", h.listSeats).Methods(http.MethodGet)
-	r.HandleFunc("/events/{id}/release", h.releaseSeat).Methods(http.MethodPost)
-
-	return r
-}
 
 func main() {
 	_ = context.Background()
@@ -44,7 +30,8 @@ func main() {
 	repo := booking.NewHybridStore(pool, rds)
 	svc := booking.NewService(repo)
 
-	r := setupRouter(svc)
+	r := routes(svc)
+
 	srv := &http.Server{
 		Addr:         ":8080",
 		Handler:      r,
