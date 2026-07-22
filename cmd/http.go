@@ -3,6 +3,7 @@ package main
 import (
 	"concurrent-seat-booking-system/internal/booking"
 	"encoding/json"
+	"errors"
 	"log"
 	"net/http"
 	"time"
@@ -13,7 +14,6 @@ import (
 type APIHandler struct {
 	svc *booking.Service
 }
-
 
 func (h *APIHandler) healthz(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
@@ -58,11 +58,10 @@ func (h *APIHandler) bookSeat(w http.ResponseWriter, r *http.Request) {
 
 	err := h.svc.Book(b)
 	if err != nil {
-		errMsg := err.Error()
-		if errMsg == "seat is already booked for this event" || errMsg == "seat hold expired or does not exist" || errMsg == "seat is held by another user" {
-			http.Error(w, errMsg, http.StatusConflict)
+		if errors.Is(err, booking.ErrSeatAlreadyBooked) || errors.Is(err, booking.ErrHoldExpired) || errors.Is(err, booking.ErrUnauthorizedHold) {
+			http.Error(w, err.Error(), http.StatusConflict)
 		} else {
-			http.Error(w, errMsg, http.StatusInternalServerError)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
 		}
 		return
 	}
@@ -94,7 +93,7 @@ func (h *APIHandler) holdSeat(w http.ResponseWriter, r *http.Request) {
 
 	held, err := h.svc.Hold(b)
 	if err != nil {
-		if err.Error() == "seat already booked" || err.Error() == "seat is already booked for this event" {
+		if errors.Is(err, booking.ErrSeatAlreadyBooked) {
 			http.Error(w, err.Error(), http.StatusConflict)
 		} else {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -104,7 +103,7 @@ func (h *APIHandler) holdSeat(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
-	
+
 	resp := struct {
 		Message   string `json:"message"`
 		ExpiresAt string `json:"expires_at"`
@@ -112,7 +111,7 @@ func (h *APIHandler) holdSeat(w http.ResponseWriter, r *http.Request) {
 		Message:   "seat held successfully",
 		ExpiresAt: held.ExpiresAt.Format(time.RFC3339),
 	}
-	
+
 	if err := json.NewEncoder(w).Encode(resp); err != nil {
 		log.Printf("Error encoding response: %v", err)
 	}
@@ -156,7 +155,7 @@ func (h *APIHandler) releaseSeat(w http.ResponseWriter, r *http.Request) {
 
 	held, err := h.svc.Release(b)
 	if err != nil {
-		if err.Error() == "seat is not on hold" {
+		if errors.Is(err, booking.ErrSeatNotHeld) || errors.Is(err, booking.ErrUnauthorizedHold) {
 			http.Error(w, err.Error(), http.StatusConflict)
 		} else {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -166,7 +165,7 @@ func (h *APIHandler) releaseSeat(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
-	
+
 	resp := struct {
 		Message   string `json:"message"`
 		ExpiresAt string `json:"expires_at"`
@@ -174,7 +173,7 @@ func (h *APIHandler) releaseSeat(w http.ResponseWriter, r *http.Request) {
 		Message:   "seat released successfully",
 		ExpiresAt: held.ExpiresAt.Format(time.RFC3339),
 	}
-	
+
 	if err := json.NewEncoder(w).Encode(resp); err != nil {
 		log.Printf("Error encoding response: %v", err)
 	}

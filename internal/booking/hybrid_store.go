@@ -7,13 +7,10 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
 )
-
-const defaultHoldTTL = 3 * time.Minute
 
 type HybridStore struct {
 	pool *pgxpool.Pool
@@ -31,76 +28,75 @@ func UniqueKey(eventId string, seatId string) string {
 	return fmt.Sprintf("seat:%s:%s", eventId, seatId)
 }
 
+func (s *HybridStore) GetHold(eventID string, seatID string) (*Booking, error) {
+	ctx := context.Background()
+	key := UniqueKey(eventID, seatID)
+
+	val, err := s.rds.Get(ctx, key).Result()
+	if err != nil {
+		if errors.Is(err, redis.Nil) {
+			return nil, ErrHoldExpired
+		}
+		return nil, fmt.Errorf("error checking hold in redis: %w", err)
+	}
+
+	var held Booking
+	if err := json.Unmarshal([]byte(val), &held); err != nil {
+		return nil, fmt.Errorf("error parsing hold data: %w", err)
+	}
+
+	return &held, nil
+}
+
 func (s *HybridStore) Hold(b Booking) (*Booking, error) {
 	ctx := context.Background()
-	id := uuid.New().String()
-	now := time.Now()
-	expiresAt := now.Add(defaultHoldTTL)
-
-	held := Booking{
-		ID:        id,
-		UserID:    b.UserID,
-		SeatID:    b.SeatID,
-		EventID:   b.EventID,
-		Status:    "HELD",
-		ExpiresAt: expiresAt,
+	ttl := time.Until(b.ExpiresAt)
+	if ttl <= 0 {
+		ttl = 3 * time.Minute
 	}
 
-	val, _ := json.Marshal(held)
+	val, err := json.Marshal(b)
+	if err != nil {
+		return nil, fmt.Errorf("error marshaling hold data: %w", err)
+	}
+
 	res := s.rds.SetArgs(ctx, UniqueKey(b.EventID, b.SeatID), val, redis.SetArgs{
 		Mode: "NX",
-		TTL:  defaultHoldTTL,
+		TTL:  ttl,
 	})
-	ok := res.Val() == "OK"
-	if !ok {
-		return nil, errors.New("seat already booked")
+	if res.Val() != "OK" {
+		return nil, ErrSeatAlreadyBooked
 	}
-	return &held, nil
+	return &b, nil
 }
 
 func (s *HybridStore) Book(b Booking) error {
 	ctx := context.Background()
 	key := UniqueKey(b.EventID, b.SeatID)
 
-	val, err := s.rds.Get(ctx, key).Result()
-	if err != nil {
-		if err == redis.Nil {
-			return errors.New("seat hold expired or does not exist")
-		}
-		return fmt.Errorf("error checking hold in redis: %w", err)
-	}
-
-	var held Booking
-	if err := json.Unmarshal([]byte(val), &held); err != nil {
-		return fmt.Errorf("error parsing hold data: %w", err)
-	}
-
-	if held.UserID != b.UserID {
-		return errors.New("seat is held by another user")
-	}
-
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
-		return fmt.Errorf("unable to begin transaction %w", err)	
+		return fmt.Errorf("unable to begin transaction: %w", err)
 	}
 	defer tx.Rollback(ctx)
+
 	query := `
 		INSERT INTO bookings (id, event_id, seat_id, user_id, status)
 		VALUES ($1, $2, $3, $4, $5)
 	`
-	_, err = tx.Exec(ctx, query, held.ID, held.EventID, held.SeatID, held.UserID, "BOOKED") 
+	_, err = tx.Exec(ctx, query, b.ID, b.EventID, b.SeatID, b.UserID, "BOOKED")
 	if err != nil {
-		// Check if the error is a Postgres Unique Violation (code 23505)
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
-			return errors.New("seat is already booked for this event")
+			return ErrSeatAlreadyBooked
 		}
 		return err
 	}
-	err = tx.Commit(ctx)
-	if err != nil {
+
+	if err := tx.Commit(ctx); err != nil {
 		return err
 	}
+
 	s.rds.Del(ctx, key)
 	return nil
 }
@@ -138,7 +134,6 @@ func (s *HybridStore) ListEventBookings(eventID string) ([]Booking, error) {
 	ctx := context.Background()
 	var bookings []Booking
 
-	// 1. Fetch BOOKED seats from Postgres
 	query := `
 		SELECT id, event_id, seat_id, user_id, status
 		FROM bookings
@@ -161,8 +156,6 @@ func (s *HybridStore) ListEventBookings(eventID string) ([]Booking, error) {
 		return nil, err
 	}
 
-	// 2. Fetch HELD seats from Redis
-	// Using KEYS for simplicity, though SCAN is better for production
 	pattern := fmt.Sprintf("seat:%s:*", eventID)
 	keys, err := s.rds.Keys(ctx, pattern).Result()
 	if err != nil && err != redis.Nil {
@@ -184,8 +177,6 @@ func (s *HybridStore) ListEventBookings(eventID string) ([]Booking, error) {
 			}
 			var b Booking
 			if err := json.Unmarshal([]byte(strVal), &b); err == nil {
-				// We don't overwrite Status here because Hold already sets it to "HELD" before marshaling,
-				// but let's ensure it is set correctly just in case.
 				b.Status = "HELD"
 				bookings = append(bookings, b)
 			}
@@ -198,17 +189,15 @@ func (s *HybridStore) ListEventBookings(eventID string) ([]Booking, error) {
 func (s *HybridStore) Release(b Booking) (*Booking, error) {
 	ctx := context.Background()
 	key := UniqueKey(b.EventID, b.SeatID)
-	val, err := s.rds.Get(ctx, key).Result()
+
+	deleted, err := s.rds.Del(ctx, key).Result()
 	if err != nil {
 		return nil, err
 	}
-	if val == "" {
-		return nil, errors.New("seat is not on hold")
+	if deleted == 0 {
+		return nil, ErrSeatNotHeld
 	}
-	err = s.rds.Del(ctx, key).Err()
-	if err != nil {
-		return nil, err
-	}
+
 	return &Booking{
 		ID:        b.ID,
 		EventID:   b.EventID,

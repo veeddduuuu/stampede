@@ -2,23 +2,45 @@ package booking
 
 import (
 	"fmt"
+	"time"
+
+	"github.com/google/uuid"
 )
 
-type Service struct{
+const defaultHoldTTL = 3 * time.Minute
+
+type Service struct {
 	book BookingRepository
 }
 
-func NewService(book BookingRepository) *Service{
+func NewService(book BookingRepository) *Service {
 	return &Service{
 		book: book,
 	}
 }
 
 func (s *Service) Book(b Booking) error {
-	return s.book.Book(b)	
+	held, err := s.book.GetHold(b.EventID, b.SeatID)
+	if err != nil {
+		return err
+	}
+
+	if held.UserID != b.UserID {
+		return ErrUnauthorizedHold
+	}
+
+	return s.book.Book(*held)
 }
 
 func (s *Service) Hold(b Booking) (*Booking, error) {
+	if b.ID == "" {
+		b.ID = uuid.New().String()
+	}
+	b.Status = "HELD"
+	if b.ExpiresAt.IsZero() {
+		b.ExpiresAt = time.Now().Add(defaultHoldTTL)
+	}
+
 	return s.book.Hold(b)
 }
 
@@ -27,7 +49,16 @@ func (s *Service) ListBookings(userID string) ([]Booking, error) {
 }
 
 func (s *Service) Release(b Booking) (*Booking, error) {
-	return s.book.Release(b)
+	held, err := s.book.GetHold(b.EventID, b.SeatID)
+	if err != nil {
+		return nil, ErrSeatNotHeld
+	}
+
+	if held.UserID != b.UserID {
+		return nil, ErrUnauthorizedHold
+	}
+
+	return s.book.Release(*held)
 }
 
 func (s *Service) ListSeats(eventID string) ([]Seat, error) {
