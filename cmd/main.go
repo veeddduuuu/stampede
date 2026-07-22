@@ -4,6 +4,7 @@ import (
 	"concurrent-seat-booking-system/internal/adapters/postgres"
 	"concurrent-seat-booking-system/internal/adapters/redis"
 	"concurrent-seat-booking-system/internal/booking"
+	"concurrent-seat-booking-system/internal/websocket"
 	"context"
 	"log"
 	"net/http"
@@ -27,7 +28,6 @@ func routes(svc *booking.Service) *chi.Mux {
 	r.Post("/events/{id}/hold", h.holdSeat)
 	r.Get("/events/{id}/seats", h.listSeats)
 	r.Post("/events/{id}/release", h.releaseSeat)
-
 	return r
 }
 
@@ -62,6 +62,12 @@ func main() {
 			log.Fatalf("Server failed to start: %v", err)
 		}
 	}()
+
+	hub:= websocket.NewHub()
+	go hub.Run()
+	r.Get("/ws", func(w http.ResponseWriter, r *http.Request) {
+		websocket.ServeWS(hub, w, r)
+	})
 
 	// Wait for interrupt signal to gracefully shutdown the server
 	quit := make(chan os.Signal, 1)
