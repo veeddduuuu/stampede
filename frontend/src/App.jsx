@@ -23,6 +23,7 @@ function App() {
   const [actionLoading, setActionLoading] = useState(false)
   const [toasts, setToasts] = useState([])
   const toastIdRef = useRef(0)
+  const ws = useRef(null)
 
   // ── Toast helper ────────────────────────────────────
   const addToast = useCallback((message, type = 'info') => {
@@ -33,7 +34,7 @@ function App() {
     }, 3000)
   }, [])
 
-  // ── Fetch seats (polling) ───────────────────────────
+  // ── Fetch seats (initial load) ───────────────────────────
   const fetchSeats = useCallback(async () => {
     try {
       const res = await fetch(`${API_BASE}/events/${EVENT_ID}/seats`)
@@ -41,21 +42,6 @@ function App() {
         const data = await res.json()
         setSeats(data)
         setBackendStatus('online')
-
-        // If the seat we're holding got released by TTL expiry on backend,
-        // clear our local selection
-        if (selectedSeat) {
-          const ourSeat = data.find(s => s.id === selectedSeat)
-          if (ourSeat && ourSeat.status === 'AVAILABLE') {
-            // Our hold expired server-side
-            setSelectedSeat(null)
-            setHoldExpiry(null)
-          } else if (ourSeat && ourSeat.status === 'BOOKED') {
-            // Seat got booked (by us or someone else)
-            setSelectedSeat(null)
-            setHoldExpiry(null)
-          }
-        }
       } else {
         setBackendStatus('offline')
       }
@@ -64,12 +50,42 @@ function App() {
     } finally {
       setLoading(false)
     }
-  }, [selectedSeat])
+  }, [])
 
   useEffect(() => {
     fetchSeats()
-    const interval = setInterval(fetchSeats, POLL_INTERVAL)
-    return () => clearInterval(interval)
+    
+    // Connect to WebSocket using the appropriate URL
+    const wsUrl = API_BASE ? API_BASE.replace(/^http/, 'ws') + '/ws' : 'ws://127.0.0.1:8080/ws'
+    ws.current = new WebSocket(wsUrl)
+    
+    ws.current.onmessage = (event) => {
+      const data = JSON.parse(event.data)
+      
+      // Update the specific seat in the grid based on the broadcasted event
+      if (data.seat_id && data.status) {
+        setSeats(prevSeats => 
+          prevSeats.map(seat => 
+            seat.id === data.seat_id ? { ...seat, status: data.status } : seat
+          )
+        )
+        setBackendStatus('online')
+      }
+    }
+    
+    ws.current.onerror = () => {
+      setBackendStatus('offline')
+    }
+    
+    ws.current.onclose = () => {
+      setBackendStatus('offline')
+    }
+
+    return () => {
+      if (ws.current) {
+        ws.current.close()
+      }
+    }
   }, [fetchSeats])
 
   // ── TTL countdown timer ─────────────────────────────

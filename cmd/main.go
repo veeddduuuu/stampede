@@ -17,7 +17,7 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 )
 
-func routes(svc *booking.Service) *chi.Mux {
+func routes(hub *websocket.Hub, svc *booking.Service) *chi.Mux {
 	h := &APIHandler{svc: svc}
 	r := chi.NewRouter()
 	r.Use(middleware.Logger)
@@ -28,6 +28,12 @@ func routes(svc *booking.Service) *chi.Mux {
 	r.Post("/events/{id}/hold", h.holdSeat)
 	r.Get("/events/{id}/seats", h.listSeats)
 	r.Post("/events/{id}/release", h.releaseSeat)
+
+	// WebSocket endpoint
+	r.Get("/ws", func(w http.ResponseWriter, r *http.Request) {
+		websocket.ServeWS(hub, w, r)
+	})
+
 	return r
 }
 
@@ -46,13 +52,19 @@ func main() {
 	repo := booking.NewHybridStore(pool, rds)
 	svc := booking.NewService(repo)
 
-	r := routes(svc)
+	// Initialize WebSocket Hub & start event loop BEFORE starting HTTP server
+	hub := websocket.NewHub()
+	go hub.Run()
+
+	r := routes(hub, svc)
 
 	srv := &http.Server{
-		Addr:         ":8080",
-		Handler:      r,
-		ReadTimeout:  10 * time.Second,
-		WriteTimeout: 10 * time.Second,
+		Addr:        ":8080",
+		Handler:     r,
+		ReadTimeout: 10 * time.Second,
+		// WriteTimeout must be 0 for long-lived WebSocket connections,
+		// as a non-zero WriteTimeout will force-close WebSockets after N seconds.
+		WriteTimeout: 0,
 		IdleTimeout:  120 * time.Second,
 	}
 
@@ -62,12 +74,6 @@ func main() {
 			log.Fatalf("Server failed to start: %v", err)
 		}
 	}()
-
-	hub:= websocket.NewHub()
-	go hub.Run()
-	r.Get("/ws", func(w http.ResponseWriter, r *http.Request) {
-		websocket.ServeWS(hub, w, r)
-	})
 
 	// Wait for interrupt signal to gracefully shutdown the server
 	quit := make(chan os.Signal, 1)
