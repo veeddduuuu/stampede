@@ -8,7 +8,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/gorilla/mux"
+	"github.com/go-chi/chi/v5"
 )
 
 type APIHandler struct {
@@ -21,8 +21,7 @@ func (h *APIHandler) healthz(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *APIHandler) listBookings(w http.ResponseWriter, r *http.Request) {
-	vars := mux.Vars(r)
-	userID := vars["id"]
+	userID := chi.URLParam(r, "id")
 
 	bookings, err := h.svc.ListBookings(userID)
 	if err != nil {
@@ -37,8 +36,7 @@ func (h *APIHandler) listBookings(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *APIHandler) bookSeat(w http.ResponseWriter, r *http.Request) {
-	vars := mux.Vars(r)
-	eventID := vars["id"]
+	eventID := chi.URLParam(r, "id")
 
 	var req struct {
 		SeatID string `json:"seat_id"`
@@ -72,8 +70,7 @@ func (h *APIHandler) bookSeat(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *APIHandler) holdSeat(w http.ResponseWriter, r *http.Request) {
-	vars := mux.Vars(r)
-	eventID := vars["id"]
+	eventID := chi.URLParam(r, "id")
 
 	var req struct {
 		SeatID string `json:"seat_id"`
@@ -118,8 +115,7 @@ func (h *APIHandler) holdSeat(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *APIHandler) listSeats(w http.ResponseWriter, r *http.Request) {
-	vars := mux.Vars(r)
-	eventID := vars["id"]
+	eventID := chi.URLParam(r, "id")
 
 	seats, err := h.svc.ListSeats(eventID)
 	if err != nil {
@@ -134,8 +130,7 @@ func (h *APIHandler) listSeats(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *APIHandler) releaseSeat(w http.ResponseWriter, r *http.Request) {
-	vars := mux.Vars(r)
-	eventID := vars["id"]
+	eventID := chi.URLParam(r, "id")
 
 	var req struct {
 		SeatID string `json:"seat_id"`
