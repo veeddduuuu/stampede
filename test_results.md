@@ -99,3 +99,54 @@ PASS
 ok  	concurrent-seat-booking-system/internal/booking	0.093s
 ```
 
+## 6. Heavy Stampede (API Load Test)
+
+**Scenario:** 5,000 concurrent requests (500 workers) attempting to hold the exact same seat simultaneously.
+**Expected Result:** Pass (Exactly 1 success. Redis SETNX correctly blocks all 4999 other requests from reaching Postgres).
+**Actual Result:** Pass (0 double bookings, ~9300 RPS, Max Latency ~207ms).
+
+```text
+--- Load Test Results ---
+Total Requests: 5000
+Concurrency: 500
+Total Time: 536.19939ms
+Requests Per Second (RPS): 9324.89
+
+--- Status Codes ---
+Successes (201): 1
+Conflicts (409): 4999
+Errors/Other: 0
+
+--- Latency Distribution ---
+Average: 46.608216ms
+P50: 34.186132ms
+P95: 132.994648ms
+P99: 153.532148ms
+Max: 207.559118ms
+```
+
+## 7. Heavy General Load (API Load Test)
+
+**Scenario:** 5,000 concurrent requests (500 workers) attempting to hold 5,000 different seats.
+**Expected Result:** Pass (All 5000 succeed. System correctly scales and distributes load without locking conflicts).
+**Actual Result:** Pass (~9000 RPS, Max Latency ~207ms).
+
+```text
+--- Load Test Results ---
+Total Requests: 5000
+Concurrency: 500
+Total Time: 555.580071ms
+Requests Per Second (RPS): 8999.60
+
+--- Status Codes ---
+Successes (201): 5000
+Conflicts (409): 0
+Errors/Other: 0
+
+--- Latency Distribution ---
+Average: 48.090494ms
+P50: 38.095568ms
+P95: 108.600702ms
+P99: 138.417248ms
+Max: 206.949821ms
+```

@@ -177,5 +177,15 @@ The dramatic irony? The system was designed to prevent double bookings via atomi
 
 We only discovered it by querying Postgres and finding a single row staring back at us with `id = ''`. The ghost in the machine.
 
-## Phase 9: Idempotency (Pending)
+## Phase 9: Load Testing the Hybrid Store
+
+To truly validate our architecture, we needed to know its breaking point. I built a custom Go load testing tool (`cmd/loadtest/main.go`) to bombard the `/hold` API endpoint and measure the system's ability to survive extreme traffic.
+
+We ran two scenarios at 5,000 requests with 500 concurrent workers:
+1. **The Stampede**: 5,000 users all trying to grab the exact same seat at the exact same millisecond.
+2. **General Load**: 5,000 users grabbing 5,000 different seats.
+
+The results were phenomenal. During the stampede, the system processed all 5,000 requests in about half a second (~9,300 RPS). Most importantly, **exactly 1 request succeeded and 4,999 received a 409 Conflict**. The Redis `SETNX` lock absorbed the entire stampede in-memory, meaning Postgres never even saw the 4,999 conflicting requests! During the general load test, it handled ~9,000 RPS with 5,000 successes and an average latency under 50ms. Zero double bookings, incredible speed.
+
+## Phase 10: Idempotency (Pending)
 *(To be updated when we handle network retries and idempotency keys)*
