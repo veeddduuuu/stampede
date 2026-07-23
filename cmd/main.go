@@ -16,13 +16,21 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	"github.com/go-chi/cors"
 	goredis "github.com/redis/go-redis/v9"
 )
 
 func routes(hub *websocket.Hub, svc *booking.Service, rds *goredis.Client) *chi.Mux {
-	h := &APIHandler{svc: svc, rds : rds}
+	h := &APIHandler{svc: svc, rds: rds}
 	r := chi.NewRouter()
 	r.Use(middleware.Logger)
+
+	r.Use(cors.Handler(cors.Options{
+		AllowedOrigins:   []string{"https://*.vercel.app", "https://yourcustomdomain.com"},
+		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
+		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type"},
+		AllowCredentials: true,
+	}))
 
 	// Profiling endpoints
 	r.HandleFunc("/debug/pprof/", pprof.Index)
