@@ -40,6 +40,22 @@ func main() {
 	var startWg sync.WaitGroup
 	startWg.Add(1)
 
+	// Create a shared transport with a proper connection pool.
+	// The default http.Transport has MaxIdleConnsPerHost=2, which means
+	// 99.9% of connections get closed after one use and pile up in TIME_WAIT.
+	// After 100K+ requests across test steps, this exhausts the ~28K ephemeral
+	// port range and causes all subsequent connections to timeout.
+	transport := &http.Transport{
+		MaxIdleConns:        0, // unlimited
+		MaxIdleConnsPerHost: *concurrency + 100,
+		MaxConnsPerHost:     0, // unlimited
+		IdleConnTimeout:     30 * time.Second,
+	}
+	client := &http.Client{
+		Timeout:   10 * time.Second,
+		Transport: transport,
+	}
+
 	for i := 0; i < *concurrency; i++ {
 		wg.Add(1)
 		numReqs := reqsPerWorker
@@ -50,7 +66,6 @@ func main() {
 		go func(workerID, reqCount int) {
 			defer wg.Done()
 
-			client := &http.Client{Timeout: 10 * time.Second}
 			startWg.Wait() // Wait for signal to start
 
 			stampedeSeatID := fmt.Sprintf("seat-stampede-%d", startTime.Unix())

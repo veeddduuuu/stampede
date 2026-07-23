@@ -248,3 +248,50 @@ Imagine our system is a popular new restaurant. The **API server** acts as the *
 - **Redis pool starvation was a secondary issue.** With each `/hold` request performing two Redis operations (`SETNX` + `Publish`), the default pool of ~10 connections was insufficient. Bumping to 100 eliminated goroutine queuing.
 - **New bottleneck profile:** At 2000 users, each API container peaks around ~200% CPU and Redis peaks at ~123% CPU. The system is now genuinely CPU-bound rather than connection-starved. Redis' single-threaded command execution (~123% includes I/O thread overhead) is approaching its limit.
 
+## 11. Hot Seat Stampede (Correctness Under Contention)
+
+**Objective:** Prove that the Redis `SETNX` atomic lock guarantees **exactly 1 winner** when N users all fight over the same seat simultaneously. This is the flagship benchmark — it validates the entire architectural reason for the hybrid store.
+**Methodology:** All concurrent users attempt to hold the exact same seat (`seat-stampede-{timestamp}`). Redis `FLUSHALL` before each step.
+
+### Results Summary
+
+| Concurrency | Total Requests | Successes (201) | Conflicts (409) | Errors | RPS |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **100** | 2,000 | **1** | 1,999 | 0 | 5,207 |
+| **500** | 10,000 | **1** | 9,999 | 0 | 6,082 |
+| **1,000** | 20,000 | **1** | 19,999 | 0 | 6,234 |
+| **2,000** | 40,000 | **1** | 39,999 | 0 | 5,706 |
+
+### Analysis
+- **Perfect correctness at every scale.** Exactly 1 success out of N requests, every single time. Zero double bookings, zero errors, zero data corruption.
+- **Redis absorbs the stampede entirely.** The 39,999 losing requests never touch Postgres — they are rejected in-memory by Redis `SETNX` returning `nil`. Postgres only sees the 1 winning booking.
+- **Stampede is faster than throughput** because 99.99% of requests are instant Redis rejects (no write, no Publish). Only 1 request does the full `SETNX` + `Publish` flow.
+
+## 12. Combined Benchmark Suite (Stampede + Throughput)
+
+**Objective:** Run both benchmarks back-to-back to measure system behavior under sustained load.
+**Key Finding:** Initially, the 2,000-user throughput test collapsed when run after the stampede suite. We traced this to **ephemeral port exhaustion** on the load testing client, not the server.
+
+### The Client-Side Bottleneck (TIME_WAIT Exhaustion)
+Our load testing script was creating a new `http.Client` for every goroutine, which used Go's default `http.Transport` (`MaxIdleConnsPerHost: 2`). As a result, 99.9% of the connections were closed after a single use and entered the `TIME_WAIT` state. 
+
+By the time the test reached the final 2000-user step, it had opened over 100,000 connections, completely exhausting the Linux ephemeral port range (~28,000 ports). New connections couldn't be made, resulting in timeouts.
+
+**The Fix:** We configured a shared `http.Transport` in the load testing tool with a proper connection pool (`MaxIdleConnsPerHost: 2100`), ensuring TCP connections were reused across the entire test suite.
+
+### Final Throughput Results (Run After Stampede)
+
+After fixing the load-generator, the system performed flawlessly across the entire combined suite:
+
+| Concurrency | Total Requests | RPS | Avg Latency | P99 Latency | Max Latency | Errors |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| **100** | 2,000 | 7,885 | 11ms | 28ms | 38ms | 0 |
+| **250** | 5,000 | 9,127 | 25ms | 67ms | 108ms | 0 |
+| **500** | 10,000 | 9,186 | 51ms | 113ms | 190ms | 0 |
+| **1,000** | 20,000 | 9,211 | 99ms | 324ms | 475ms | 0 |
+| **2,000** | 40,000 | **9,276** | 205ms | 508ms | 1.52s | **0** |
+
+### Analysis
+- **Sustained Performance:** The cluster maintained an incredible **~9,200 RPS** at 2000 concurrent users even after grinding through the 70,000 requests of the stampede benchmark beforehand.
+- **Hardware Limits Reached:** At 2,000 users, each API container peaked at ~230% CPU, and Redis peaked at ~120% CPU. The system is perfectly balanced and utilizing all available resources.
+- **The Ultimate Takeaway:** Our architecture (Nginx load balancer + 3 Go API Nodes + Redis SETNX/PubSub + Postgres) is robust, scales horizontally, handles brutal contention flawlessly, and sustains high throughput without breaking a sweat.

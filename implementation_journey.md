@@ -247,9 +247,9 @@ That 10.000s max latency was the smoking gun. It matched the `http.Client{Timeou
 2. **No keepalive to upstreams** — Nginx was opening and closing a brand new TCP connection to the backend for every single request. Under high concurrency, this created massive overhead.
 3. **Redis connection pool was too small** — The `go-redis` client defaulted to `PoolSize = 10 * GOMAXPROCS`. Inside Docker, this could be as low as 10 connections. With each `/hold` request doing both a `SETNX` AND a `Publish` (two Redis ops), goroutines were queuing up waiting for a free connection.
 
-## Phase 13: The 10x Fix (Nginx + Redis Pool Tuning)
+## Phase 13: The Server-Side Fix (Nginx + Redis Pool Tuning)
 
-We applied three surgical fixes:
+We applied three surgical fixes to the server infrastructure:
 
 **Nginx (`nginx.conf`):**
 - `worker_processes auto` — use all available CPU cores instead of 1.
@@ -261,21 +261,26 @@ We applied three surgical fixes:
 - `PoolSize: 100` — each API container now has 100 Redis connections (was ~10).
 - `MinIdleConns: 20` — keeps 20 warm connections ready to avoid cold-start latency.
 
-**Load Test Script (`scripts/run_load_test.sh`):**
-- Added `redis-cli FLUSHALL` between steps so stale holds from prior steps don't cause misleading conflicts.
-- Changed docker stats polling from fixed 5-iteration loop to continuous 200ms sampling, killed when the test finishes.
+This resulted in a massive leap in performance. However, when we restructured our load test to run two distinct benchmarks back-to-back (a "Hot Seat Stampede" correctness test followed by a "General Throughput" scaling test), the 2,000-user throughput test catastrophically failed again.
 
-The results were staggering:
+## Phase 14: The Client-Side Fix (Ephemeral Port Exhaustion)
 
-| Concurrency | RPS (Before) | RPS (After) | P99 (Before) | P99 (After) | Errors (Before) | Errors (After) |
-| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **100** | 3,518 | **6,876** | 102ms | **44ms** | 0 | 0 |
-| **250** | 4,812 | **7,908** | 330ms | **77ms** | 0 | 0 |
-| **500** | 4,659 | **8,674** | 625ms | **128ms** | 0 | 0 |
-| **1,000** | 4,032 | **6,757** | 2.2s | **271ms** | 95 | 0 |
-| **2,000** | 793 | **7,997** | 10.0s | **671ms** | 4,650 | **0** |
+The failure during the combined test suite revealed a classic client-side bottleneck. By running 70,000 requests (Stampede) immediately followed by 40,000 requests (Throughput), we were exhausting the load-generator machine.
 
-At 2,000 concurrent users: a **10x RPS improvement**, **15x P99 latency reduction**, and **zero errors**. The system processed all 40,000 requests in 5 seconds flat. The restaurant analogy extended: we didn't just hire more waiters — we replaced the tiny front door with a revolving door and gave each waiter a direct phone line to the kitchen instead of making them walk back and forth.
+**The Diagnosis:**
+Our load testing script (`cmd/loadtest/main.go`) was creating a new `http.Client` for every goroutine, relying on Go's default `http.Transport` which has `MaxIdleConnsPerHost: 2`. This meant 99.9% of TCP connections were closed immediately after a single request, entering the `TIME_WAIT` state in the Linux kernel for 60 seconds. We quickly burned through all ~28,000 available ephemeral ports on the host machine. Subsequent requests failed with 10-second timeouts because they literally could not open a socket.
 
-## Phase 14: Idempotency (Pending)
+**The Fix:**
+We configured a shared `http.Transport` in the load test tool with a massive connection pool (`MaxIdleConnsPerHost: 2100`), ensuring the client reused TCP connections instead of throwing them away.
+
+### The Final Results
+
+With both the server and the client properly tuned for high concurrency, the system performed flawlessly:
+
+1. **Perfect Correctness:** In the Hot Seat Stampede (40,000 users fighting for 1 seat), we achieved exactly **1 success and 39,999 conflicts**, with zero errors and zero double-bookings.
+2. **Sustained Throughput:** In the general load test, the cluster maintained a blistering **~9,200 RPS** at 2,000 concurrent users. 
+
+The restaurant analogy extended: we replaced the tiny front door with a revolving door (Nginx), gave the waiters a direct line to the kitchen (Redis pool), and finally organized the customers so they weren't blocking traffic outside (Client-side port exhaustion). The system is now entirely CPU-bound and perfectly balanced.
+
+## Phase 15: Idempotency (Pending)
 *(To be updated when we handle network retries and idempotency keys)*
