@@ -16,10 +16,11 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	goredis "github.com/redis/go-redis/v9"
 )
 
-func routes(hub *websocket.Hub, svc *booking.Service) *chi.Mux {
-	h := &APIHandler{svc: svc}
+func routes(hub *websocket.Hub, svc *booking.Service, rds *goredis.Client) *chi.Mux {
+	h := &APIHandler{svc: svc, rds : rds}
 	r := chi.NewRouter()
 	r.Use(middleware.Logger)
 
@@ -62,9 +63,10 @@ func main() {
 
 	// Initialize WebSocket Hub & start event loop BEFORE starting HTTP server
 	hub := websocket.NewHub()
+	go hub.ListenToRedis(context.Background(), rds)
 	go hub.Run()
 
-	r := routes(hub, svc)
+	r := routes(hub, svc, rds)
 
 	srv := &http.Server{
 		Addr:        ":8080",

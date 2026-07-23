@@ -1,5 +1,10 @@
 package websocket
 
+import (
+	"context"
+	"log"
+	"github.com/redis/go-redis/v9"
+)
 // Hub maintains the set of active clients and broadcasts messages to the clients.
 type Hub struct {
 	// Registered clients map (client pointer -> true)
@@ -13,6 +18,8 @@ type Hub struct {
 
 	// Unregister requests from disconnected clients
 	unregister chan *Client
+
+	redisClient *redis.Client
 }
 
 func NewHub() *Hub {
@@ -24,6 +31,19 @@ func NewHub() *Hub {
 	}
 }
 
+func (h *Hub) ListenToRedis(ctx context.Context, rds *redis.Client) {
+	log.Println("Listening to Redis events...")
+	pubsub := rds.Subscribe(ctx, "events:seat_updates")
+	defer pubsub.Close()
+	ch := pubsub.Channel()
+
+	for msg := range ch {
+		if msg.Payload == "nil" {
+			continue
+		}
+		h.broadcast <- []byte(msg.Payload)
+	}
+}
 // Run starts the hub's event loop.
 func (h *Hub) Run() {
 	for {

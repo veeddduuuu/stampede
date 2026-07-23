@@ -223,5 +223,16 @@ Imagine our system is a restaurant. The **API server** represents the **Waiters*
 **The Solution:**
 To serve more customers, we don't need a faster database just yet. We need to hire more waiters (Horizontal Scaling: adding a second API server behind a load balancer).
 
-## Phase 11: Idempotency (Pending)
+## Phase 11: Hiring More Waiters (Horizontal Scaling with Nginx)
+
+Following our performance engineering discovery that our API server was the bottleneck, we put the solution into action.
+
+We updated our `docker-compose.yml` to spin up three identical Go API containers: `api1`, `api2`, and `api3`. To manage the traffic across them, we introduced **Nginx** as a reverse proxy. 
+
+**The Load Balancing Strategy:**
+Instead of using a naive round-robin approach, we configured the Nginx `upstream` block with the `least_conn` directive. This was a crucial architectural decision. Because some requests (like a cache hit) are blazing fast, while others (like a Postgres write) take a bit longer, round-robin could accidentally pile up slow requests on a single server. `least_conn` acts like a smart host at a restaurant—it looks at all three waiters (`api1`, `api2`, `api3`) and assigns the next customer to whoever is currently juggling the fewest tables.
+
+When we tailed the logs across all three containers and fired a rapid burst of `curl` requests at Nginx, it was incredibly satisfying to watch the traffic get perfectly distributed across the cluster. The restaurant had successfully expanded!
+
+## Phase 12: Idempotency (Pending)
 *(To be updated when we handle network retries and idempotency keys)*

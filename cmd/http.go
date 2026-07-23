@@ -9,10 +9,13 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/redis/go-redis/v9"	
+    "concurrent-seat-booking-system/internal/websocket"
 )
 
 type APIHandler struct {
 	svc *booking.Service
+	rds *redis.Client
 }
 
 func (h *APIHandler) healthz(w http.ResponseWriter, r *http.Request) {
@@ -64,6 +67,20 @@ func (h *APIHandler) bookSeat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	event := websocket.SeatUpdateEvent{
+		Type	: websocket.EventSeatBooked,      
+    	EventID : b.EventID,
+    	SeatID  : b.SeatID,
+    	Status  : "BOOKED",
+    	HeldBy  :   b.UserID,
+    	Timestamp : time.Now().Unix(),
+	}
+
+	payload, err := json.Marshal(event)
+	if err == nil {
+		h.rds.Publish(r.Context(), "event:seat_updates", payload)
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	w.Write([]byte(`{"message": "booking successful"}`))
@@ -96,6 +113,20 @@ func (h *APIHandler) holdSeat(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 		}
 		return
+	}
+
+	event := websocket.SeatUpdateEvent{
+		Type	: websocket.EventSeatHeld,      
+    	EventID : held.EventID,
+    	SeatID  : held.SeatID,
+    	Status  : "HELD",
+    	HeldBy  :   held.UserID,
+    	Timestamp : time.Now().Unix(),
+	}
+
+	payload, err := json.Marshal(event)
+	if err == nil {
+		h.rds.Publish(r.Context(), "event:seat_updates", payload)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -156,6 +187,20 @@ func (h *APIHandler) releaseSeat(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 		}
 		return
+	}
+
+	event := websocket.SeatUpdateEvent{
+		Type	: websocket.EventSeatReleased,      
+    	EventID : held.EventID,
+    	SeatID  : held.SeatID,
+    	Status  : "AVAILABLE",
+    	HeldBy  :   held.UserID,
+    	Timestamp : time.Now().Unix(),
+	}
+
+	payload, err := json.Marshal(event)
+	if err == nil {
+		h.rds.Publish(r.Context(), "event:seat_updates", payload)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
