@@ -1,24 +1,15 @@
 services:
-  redis:
-    container_name: redis
+  stampede-redis:
+    container_name: stampede-redis
     image: redis:latest
     ports:
-      - "6379:6379"
+      - "6381:6379"
 
-  redis-commander:
-    container_name: redis-commander
-    image: rediscommander/redis-commander:latest
-    ports:
-      - "6380:6380"
-    restart: always
-    environment:
-      - REDIS_HOSTS=local:redis:6379
-
-  nginx:
-    container_name: nginx
+  stampede-nginx:
+    container_name: stampede-nginx
     image: nginx:latest
     ports:
-      - "8000:80"
+      - "8001:80"
     volumes:
       - ./nginx.conf:/etc/nginx/nginx.conf
     depends_on:
@@ -29,36 +20,36 @@ services:
 
   api1:
     build: .
-    container_name: api1
+    container_name: stampede-api1
     ports:
       - "8080:8080"
     depends_on:
-      - redis
+      - stampede-redis
     environment:
       - POSTGRES_URL=${POSTGRES_URL}
-      - REDIS_ADDR=redis:6379
+      - REDIS_ADDR=stampede-redis:6379
     restart: always
 
   api2:
     build: .
-    container_name: api2
+    container_name: stampede-api2
     ports:
       - "8083:8080"
     depends_on:
-      - redis
+      - stampede-redis
     environment:
       - POSTGRES_URL=${POSTGRES_URL}
-      - REDIS_ADDR=redis:6379
+      - REDIS_ADDR=stampede-redis:6379
     restart: always
 
   api3:
     build: .
-    container_name: api3
+    container_name: stampede-api3
     ports:
       - "8082:8080"
     depends_on:
-      - redis
+      - stampede-redis
     environment:
       - POSTGRES_URL=${POSTGRES_URL}
-      - REDIS_ADDR=redis:6379
+      - REDIS_ADDR=stampede-redis:6379
     restart: always
