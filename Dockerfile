@@ -7,7 +7,7 @@ RUN go mod download
 
 COPY . .
 
-RUN go build -o api_server ./cmd/main.go ./cmd/http.go
+RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o api_server ./cmd/main.go ./cmd/http.go
 
 FROM alpine:latest
 

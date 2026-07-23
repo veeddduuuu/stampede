@@ -20,6 +20,7 @@ services:
 
   api1:
     build: .
+    image: stampede-api:latest
     container_name: stampede-api1
     ports:
       - "8080:8080"
@@ -31,11 +32,12 @@ services:
     restart: always
 
   api2:
-    build: .
+    image: stampede-api:latest
     container_name: stampede-api2
     ports:
       - "8083:8080"
     depends_on:
+      - api1
       - stampede-redis
     environment:
       - POSTGRES_URL=${POSTGRES_URL}
@@ -43,11 +45,12 @@ services:
     restart: always
 
   api3:
-    build: .
+    image: stampede-api:latest
     container_name: stampede-api3
     ports:
       - "8082:8080"
     depends_on:
+      - api1
       - stampede-redis
     environment:
       - POSTGRES_URL=${POSTGRES_URL}
