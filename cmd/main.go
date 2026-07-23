@@ -26,7 +26,7 @@ func routes(hub *websocket.Hub, svc *booking.Service, rds *goredis.Client) *chi.
 	r.Use(middleware.Logger)
 
 	r.Use(cors.Handler(cors.Options{
-		AllowedOrigins:   []string{"https://*.vercel.app", "https://yourcustomdomain.com"},
+		AllowedOrigins:   []string{"https://*.vercel.app", "https://stampede-go.duckdns.org/"},
 		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
 		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type"},
 		AllowCredentials: true,
