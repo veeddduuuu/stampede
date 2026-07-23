@@ -90,6 +90,11 @@ Here is the actual proof from the test run, showing exactly one successful booki
 === RUN   TestRedisStore_ConcurrentBookings
 2026/07/20 03:34:22 Connected to Redis: localhost:6379
 2026/07/20 03:34:22 Booking held for user user-81: &{ID:74729599-97b2-4cb7-a018-a93cd9464217 EventID:event-1 SeatID:seat-1 UserID:user-81 Status:HELD ExpiresAt:2026-07-20 03:34:23.788297743 +0530 IST m=+1.207095369}
+--- PASS: TestRedisStore_ConcurrentBookings (0.03s)
+PASS
+ok      concurrent-seat-booking-system/internal/booking 1.045s
+```
+
 ## Phase 4: Persistent Storage (PostgreSQL & Redis)
 
 **What we built:**
@@ -131,11 +136,26 @@ For the frontend, we went with React 19 and Vite 8, keeping it deliberately mini
 The seat map is a 10×10 grid (rows A-J). It uses just three colors: grey for available, orange for held, and green for booked. 
 The click flow is intuitive: click a grey seat, it sends a `POST hold`, and the seat turns orange with a slick TTL countdown bar. Click "Confirm", it sends a `POST book`, and the seat turns green. Click "Release", it sends a `POST release`, and it goes back to grey.
 
-The client polls `GET /events/{id}/seats` every 2 seconds. A cool trick we used is that it renders the 100 default seats client-side even if the backend is temporarily offline, so the grid is always visible. 
+The client originally polled `GET /events/{id}/seats` every 2 seconds. A cool trick we used is that it renders the 100 default seats client-side even if the backend is temporarily offline, so the grid is always visible. 
 
 Thematically, I went over-the-top: a saffron/Indian tricolor theme with an animated gradient title, a floating flag emoji, and a stage label for the "Modiji Meetup 2026". 
 
 The real magic happened when we opened two browser tabs side-by-side to test real-time polling. One user holds a seat, and boom—the other tab shows it orange within 2 seconds. It felt incredibly satisfying.
+
+## Phase 7B: The Real-Time Upgrade (WebSockets & Redis Pub/Sub)
+While the 2-second HTTP polling worked, it had two fatal flaws: it generated massive unnecessary network spam when nothing was happening, and a 2-second delay in a high-concurrency ticket sale is an eternity.
+
+We decided to migrate from short-polling to **WebSockets** for instant push updates (<5ms latency).
+
+But this introduced a massive architectural challenge: WebSockets are *stateful* and live entirely inside the memory of the Go API server. If we horizontally scale to 5 API servers behind a load balancer, User A might connect to Server 1, and User B might connect to Server 2. When User A books a seat on Server 1, how does Server 2 know to tell User B over WebSockets?
+
+**The Solution: Redis Pub/Sub**
+We used our existing Redis instance to build a high-speed messaging bridge across all API servers.
+1. When a user books a seat via a standard HTTP POST, the API saves the booking to Postgres, and then immediately publishes a JSON event payload to a Redis channel (`seat_events:<event_id>`).
+2. Every single API server runs a background goroutine (`StartRedisSubscriberBridge`) that listens to this Redis channel.
+3. When the Redis message arrives, the server instantly routes it to its internal WebSocket `Hub`, which broadcasts the state change to every connected browser on that specific server.
+
+The result? Absolute real-time synchronization across an infinite number of scaled backend servers, with zero database polling.
 
 ## Phase 8: The Ghost Booking Bug
 This was our crown jewel bug. I have to tell you, it drove us crazy for a while.

@@ -150,3 +150,40 @@ P95: 108.600702ms
 P99: 138.417248ms
 Max: 206.949821ms
 ```
+
+## 8. Performance Engineering: Phase 1 (Bottleneck Identification)
+
+**Objective:** Systematically increase load on the `/events/{id}/hold` endpoint (Redis-backed locking mechanism) to identify the true breaking point of the system rather than targeting an arbitrary RPS number.
+**Methodology:** Stepped concurrency (100, 250, 500, 1000, 2000 users) generating 20 requests per user. Recorded system latency, error rate, and container CPU/Memory saturation.
+
+### Results Summary
+
+| Concurrency | Total Requests | RPS | Avg Latency | P99 Latency | Max Latency | API CPU | Redis CPU |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| **100** | 2,000 | 7,649 | 12ms | 35ms | 41ms | ~0.1% | ~16.0% |
+| **250** | 5,000 | 10,197 | 22ms | 55ms | 74ms | ~0.1% | ~28.0% |
+| **500** | 10,000 | 10,824 | 41ms | 114ms | 165ms | ~0.0% | ~68.8% |
+| **1000** | 20,000 | 10,305 | 89ms | 257ms | 344ms | Spiked to 661% | ~75.8% |
+| **2000** | 40,000 | 9,863 | 181ms | 620ms | 984ms | Spiked to 519% | ~76.7% |
+
+*Note: The test correctly yielded a mix of `201 Created` and `409 Conflict` (for already held seats), proving the `SET NX` concurrency locks were strictly honored under load.*
+
+### Bottleneck Analysis
+- **Breaking Point**: Latency begins to meaningfully degrade between 1000 and 2000 concurrent users. At 2000 concurrency, the P99 latency spikes past 500ms (620ms) and max latency reaches nearly 1 second.
+- **The Bottleneck**: The primary bottleneck is the **API Server CPU**, which completely saturates (consuming 5 to 6 full CPU cores). 
+- **Secondary Constraint**: The **Redis Container CPU** is also nearing its limit for a single core (~76% utilized), indicating that even if we scaled the API server horizontally, Redis' single-threaded command execution would become the bottleneck shortly after. Memory consumption for both the API (max ~230MB) and Redis (max ~23MB) was perfectly stable and negligible.
+
+![Docker Stats showing API at ~600% CPU and Redis at ~76%](docs/docker_stats.png)
+
+### The "Restaurant" Analogy (Understanding the Results)
+If you're new to performance engineering, here's a simple way to visualize exactly what we did and what we found:
+
+Imagine our system is a popular new restaurant. The **API server** acts as the **Waiters** taking orders, and **Redis** acts as the **Head Chef** checking the whiteboard to ensure a meal (seat) isn't sold out.
+
+1. **What we did**: Instead of guessing the restaurant's capacity, we sent increasingly large waves of customers (100, then 500, then 2,000) through the door at the exact same time.
+2. **How we measured**: We timed how long people waited in line (Latency) and hooked up heart rate monitors to the staff (CPU usage via `docker stats`).
+3. **The Metrics**:
+   - **RPS (Requests per Second):** How many orders were taken per second. We peaked around 10,000!
+   - **P99 Latency:** The wait time for the unluckiest 1% of customers in line. It jumped to 620ms when 2,000 customers hit the doors at once.
+4. **The Bottleneck (The Outcome)**: When the wait time spiked, we checked the heart rate monitors. The Head Chef (Redis) was working hard (76% capacity) but keeping up. The problem was the Waiters (API Server)! They were maxed out at ~600% capacity (running as fast as 6 CPU cores would allow). The line backed up because there weren't enough waiters to write down the orders.
+5. **Next Steps**: To serve more customers, we don't need a faster chef yet. We need to hire more waiters (Horizontal Scaling: adding a second API server).
