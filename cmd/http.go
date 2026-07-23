@@ -78,7 +78,7 @@ func (h *APIHandler) bookSeat(w http.ResponseWriter, r *http.Request) {
 
 	payload, err := json.Marshal(event)
 	if err == nil {
-		h.rds.Publish(r.Context(), "event:seat_updates", payload)
+		h.rds.Publish(r.Context(), "events:seat_updates", payload)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -126,7 +126,7 @@ func (h *APIHandler) holdSeat(w http.ResponseWriter, r *http.Request) {
 
 	payload, err := json.Marshal(event)
 	if err == nil {
-		h.rds.Publish(r.Context(), "event:seat_updates", payload)
+		h.rds.Publish(r.Context(), "events:seat_updates", payload)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -200,7 +200,7 @@ func (h *APIHandler) releaseSeat(w http.ResponseWriter, r *http.Request) {
 
 	payload, err := json.Marshal(event)
 	if err == nil {
-		h.rds.Publish(r.Context(), "event:seat_updates", payload)
+		h.rds.Publish(r.Context(), "events:seat_updates", payload)
 	}
 
 	w.Header().Set("Content-Type", "application/json")

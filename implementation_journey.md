@@ -234,5 +234,48 @@ Instead of using a naive round-robin approach, we configured the Nginx `upstream
 
 When we tailed the logs across all three containers and fired a rapid burst of `curl` requests at Nginx, it was incredibly satisfying to watch the traffic get perfectly distributed across the cluster. The restaurant had successfully expanded!
 
-## Phase 12: Idempotency (Pending)
+## Phase 12: Finding the Hidden Bottleneck (Nginx Starvation)
+
+With Nginx in place, we ran our stepped load test suite again to verify the horizontal scaling. The initial results were deeply confusing.
+
+Up to 1,000 concurrent users, the system handled ~4,000 RPS with even CPU distribution across all 3 API containers (~130% each). But at 2,000 concurrent users, everything collapsed: RPS plummeted to **793**, we saw **4,650 timeout errors**, and the max latency hit exactly **10.000 seconds**. The strangest clue? The API containers were sitting at **0% CPU** for most of the run — they weren't even getting the requests!
+
+**The Diagnosis:**
+That 10.000s max latency was the smoking gun. It matched the `http.Client{Timeout: 10 * time.Second}` in our load test tool. Requests weren't "slow" — they were **never reaching the backend**. The culprit was Nginx's default configuration:
+
+1. **`events {}` was empty** — Nginx defaulted to 1 worker process with only 512 `worker_connections`. At 2,000 concurrent users, requests piled up in Nginx's TCP backlog and died.
+2. **No keepalive to upstreams** — Nginx was opening and closing a brand new TCP connection to the backend for every single request. Under high concurrency, this created massive overhead.
+3. **Redis connection pool was too small** — The `go-redis` client defaulted to `PoolSize = 10 * GOMAXPROCS`. Inside Docker, this could be as low as 10 connections. With each `/hold` request doing both a `SETNX` AND a `Publish` (two Redis ops), goroutines were queuing up waiting for a free connection.
+
+## Phase 13: The 10x Fix (Nginx + Redis Pool Tuning)
+
+We applied three surgical fixes:
+
+**Nginx (`nginx.conf`):**
+- `worker_processes auto` — use all available CPU cores instead of 1.
+- `worker_connections 4096` — handle thousands of simultaneous connections per worker.
+- `keepalive 64` — reuse TCP connections to backend APIs instead of creating a new one per request.
+- `proxy_http_version 1.1` + empty `Connection` header — required for keepalive to work on the upstream side.
+
+**Redis Pool (`internal/adapters/redis/redis.go`):**
+- `PoolSize: 100` — each API container now has 100 Redis connections (was ~10).
+- `MinIdleConns: 20` — keeps 20 warm connections ready to avoid cold-start latency.
+
+**Load Test Script (`scripts/run_load_test.sh`):**
+- Added `redis-cli FLUSHALL` between steps so stale holds from prior steps don't cause misleading conflicts.
+- Changed docker stats polling from fixed 5-iteration loop to continuous 200ms sampling, killed when the test finishes.
+
+The results were staggering:
+
+| Concurrency | RPS (Before) | RPS (After) | P99 (Before) | P99 (After) | Errors (Before) | Errors (After) |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| **100** | 3,518 | **6,876** | 102ms | **44ms** | 0 | 0 |
+| **250** | 4,812 | **7,908** | 330ms | **77ms** | 0 | 0 |
+| **500** | 4,659 | **8,674** | 625ms | **128ms** | 0 | 0 |
+| **1,000** | 4,032 | **6,757** | 2.2s | **271ms** | 95 | 0 |
+| **2,000** | 793 | **7,997** | 10.0s | **671ms** | 4,650 | **0** |
+
+At 2,000 concurrent users: a **10x RPS improvement**, **15x P99 latency reduction**, and **zero errors**. The system processed all 40,000 requests in 5 seconds flat. The restaurant analogy extended: we didn't just hire more waiters — we replaced the tiny front door with a revolving door and gave each waiter a direct phone line to the kitchen instead of making them walk back and forth.
+
+## Phase 14: Idempotency (Pending)
 *(To be updated when we handle network retries and idempotency keys)*

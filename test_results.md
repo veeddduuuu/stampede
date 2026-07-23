@@ -187,3 +187,64 @@ Imagine our system is a popular new restaurant. The **API server** acts as the *
    - **P99 Latency:** The wait time for the unluckiest 1% of customers in line. It jumped to 620ms when 2,000 customers hit the doors at once.
 4. **The Bottleneck (The Outcome)**: When the wait time spiked, we checked the heart rate monitors. The Head Chef (Redis) was working hard (76% capacity) but keeping up. The problem was the Waiters (API Server)! They were maxed out at ~600% capacity (running as fast as 6 CPU cores would allow). The line backed up because there weren't enough waiters to write down the orders.
 5. **Next Steps**: To serve more customers, we don't need a faster chef yet. We need to hire more waiters (Horizontal Scaling: adding a second API server).
+
+## 9. Performance Engineering: Phase 2 (Nginx Load Balancing — Default Config)
+
+**Objective:** Verify that adding an Nginx load balancer and scaling to 3 API instances (`api1`, `api2`, `api3`) successfully distributes the CPU load.
+**Methodology:** Ran the stepped load test (100, 250, 500, 1000, 2000 concurrent users) hitting the Nginx proxy on port 8000. Redis was NOT flushed between steps, so conflicts accumulated from prior steps.
+
+### Results Summary
+
+| Concurrency | Total Requests | RPS | Avg Latency | P99 Latency | Max Latency | Errors |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| **100** | 2,000 | 3,518 | 26ms | 102ms | 151ms | 0 |
+| **250** | 5,000 | 4,812 | 41ms | 330ms | 374ms | 0 |
+| **500** | 10,000 | 4,659 | 82ms | 625ms | 1.23s | 0 |
+| **1,000** | 20,000 | 4,032 | 158ms | 2.2s | 3.5s | 95 |
+| **2,000** | 40,000 | 793 | 1.4s | 10.0s | 10.0s | 4,650 (Timeouts) |
+
+### Analysis
+- **Load Distribution Success:** `docker stats` confirmed that Nginx perfectly balanced the traffic using the `least_conn` strategy. CPU usage was evenly distributed across `api1`, `api2`, and `api3` (each peaking around ~130-140%).
+- **Critical Bottleneck Found:** At 2,000 concurrent users, the system catastrophically failed. RPS collapsed from ~4,000 to 793, and 4,650 requests timed out at exactly 10.0 seconds. The key clue: API containers showed **0% CPU** for most of the run — requests were never reaching them. The bottleneck was Nginx itself, running with default settings (1 worker, 512 max connections, no keepalive).
+
+## 10. Performance Engineering: Phase 3 (Nginx + Redis Pool Tuning)
+
+**Objective:** Eliminate the Nginx connection bottleneck and Redis pool starvation discovered in Phase 2.
+**Changes Applied:**
+1. **Nginx:** `worker_processes auto`, `worker_connections 4096`, `keepalive 64` to upstream, `proxy_http_version 1.1`.
+2. **Redis Pool:** `PoolSize: 100`, `MinIdleConns: 20` per API container.
+3. **Test Script:** Added `FLUSHALL` between steps, changed stats polling to 200ms continuous sampling.
+
+### Results Summary
+
+| Concurrency | Total Requests | RPS | Avg Latency | P99 Latency | Max Latency | Errors |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| **100** | 2,000 | 6,876 | 13ms | 44ms | 59ms | 0 |
+| **250** | 5,000 | 7,908 | 29ms | 77ms | 115ms | 0 |
+| **500** | 10,000 | 8,674 | 53ms | 128ms | 183ms | 0 |
+| **1,000** | 20,000 | 6,757 | 113ms | 271ms | 1.01s | 0 |
+| **2,000** | 40,000 | 7,997 | 233ms | 671ms | 2.02s | **0** |
+
+### Resource Utilization (Peak at 2000 Concurrency)
+
+| Container | Peak CPU | Peak Memory |
+| :--- | :--- | :--- |
+| api1 | 196% | 68 MiB |
+| api2 | 201% | 66 MiB |
+| api3 | 192% | 68 MiB |
+| redis | 123% | 20 MiB |
+
+### Before vs After Comparison (2000 Concurrent Users)
+
+| Metric | Before Tuning | After Tuning | Improvement |
+| :--- | :--- | :--- | :--- |
+| **RPS** | 793 | 7,997 | **10x** |
+| **P99 Latency** | 10.0s (timeout) | 671ms | **15x** |
+| **Max Latency** | 10.0s | 2.02s | **5x** |
+| **Errors** | 4,650 | 0 | **Eliminated** |
+
+### Analysis
+- **Nginx was the entire bottleneck.** The default config (1 worker, 512 connections, no keepalive) created a tiny funnel that choked at scale. Tuning it removed the bottleneck entirely.
+- **Redis pool starvation was a secondary issue.** With each `/hold` request performing two Redis operations (`SETNX` + `Publish`), the default pool of ~10 connections was insufficient. Bumping to 100 eliminated goroutine queuing.
+- **New bottleneck profile:** At 2000 users, each API container peaks around ~200% CPU and Redis peaks at ~123% CPU. The system is now genuinely CPU-bound rather than connection-starved. Redis' single-threaded command execution (~123% includes I/O thread overhead) is approaching its limit.
+

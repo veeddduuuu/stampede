@@ -9,7 +9,9 @@ import (
 
 func NewRedisClient(addr string) *goredis.Client {
 	rdb := goredis.NewClient(&goredis.Options{
-		Addr: addr,
+		Addr:         addr,
+		PoolSize:     100,
+		MinIdleConns: 20,
 	})
 	if err := rdb.Ping(context.Background()).Err(); err != nil {
 		log.Fatalf("Failed to connect to Redis: %v", err)

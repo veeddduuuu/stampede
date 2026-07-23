@@ -13,7 +13,7 @@ ulimit -n 20000
 CONCURRENCIES=(100 250 500 1000 2000)
 
 echo "Starting Phased Load Testing..."
-echo "Target URL: http://localhost:8080/events/event-1/hold"
+echo "Target URL: http://localhost:8000/events/event-1/hold"
 
 for c in "${CONCURRENCIES[@]}"; do
     reqs=$((c * 20))
@@ -22,22 +22,26 @@ for c in "${CONCURRENCIES[@]}"; do
     echo "🔥 STEP: $c Concurrent Users ($reqs total requests)"
     echo "====================================================="
     
+    echo "Flushing Redis holds before step..."
+    docker compose exec -T redis redis-cli FLUSHALL
+    
     # Capture metrics in the background while the test runs
-    # We will poll docker stats 3 times and save to a temporary file
+    # We will poll docker stats every 0.2s and save to a temporary file
     rm -f .docker_stats.tmp
     (
-        for i in {1..5}; do
-            docker stats --no-stream api redis --format "table {{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}" >> .docker_stats.tmp 2>/dev/null || true
-            sleep 1
+        while true; do
+            docker stats --no-stream api1 api2 api3 redis --format "table {{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}" >> .docker_stats.tmp 2>/dev/null || true
+            sleep 0.2
         done
     ) &
     STATS_PID=$!
 
     # Run the load test
-    go run cmd/loadtest/main.go -requests $reqs -concurrency $c -scenario general -url "http://localhost:8080/events/event-1/hold"
+    go run cmd/loadtest/main.go -requests $reqs -concurrency $c -scenario general -url "http://localhost:8000/events/event-1/hold"
     
-    # Wait for the stats collection to finish if it hasn't
-    wait $STATS_PID
+    # Stop the stats collection now that the test is done
+    kill $STATS_PID
+    wait $STATS_PID 2>/dev/null || true
     
     echo ""
     echo "--- Resource Utilization (sampled during run) ---"
