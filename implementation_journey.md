@@ -187,5 +187,21 @@ We ran two scenarios at 5,000 requests with 500 concurrent workers:
 
 The results were phenomenal. During the stampede, the system processed all 5,000 requests in about half a second (~9,300 RPS). Most importantly, **exactly 1 request succeeded and 4,999 received a 409 Conflict**. The Redis `SETNX` lock absorbed the entire stampede in-memory, meaning Postgres never even saw the 4,999 conflicting requests! During the general load test, it handled ~9,000 RPS with 5,000 successes and an average latency under 50ms. Zero double bookings, incredible speed.
 
-## Phase 10: Idempotency (Pending)
+## Phase 10: Performance Engineering (Finding the Bottleneck)
+We wanted to adopt a true performance engineering mindset. Instead of arbitrarily guessing how many requests per second (RPS) our system could handle, we wanted to answer one question: **"What breaks first as I increase load?"**
+
+To do this, we updated our `cmd/loadtest/main.go` and wrapped it in a bash orchestration script to hit the `/events/{id}/hold` endpoint in massive, stepped waves (100, 250, 500, 1000, and 2000 concurrent users). While the test ran, we used `docker stats` to measure the CPU and Memory usage of the API and Redis containers.
+
+**The "Restaurant" Analogy:**
+Imagine our system is a restaurant. The **API server** represents the **Waiters** taking orders, and **Redis** represents the **Head Chef** checking the kitchen whiteboard to ensure a meal (seat) isn't sold out.
+
+1. **The Test**: We sent increasingly large groups of customers through the door simultaneously.
+2. **The Metrics**: We peaked at around ~10,000 RPS. We measured the "wait time in line" using P99 Latency (the time it took for the unluckiest 1% of customers to get served).
+3. **The Breaking Point**: At 2,000 concurrent customers, the P99 wait time suddenly spiked to 620ms.
+4. **The Bottleneck**: We checked the "heart rate monitors" (`docker stats`). The Head Chef (Redis) was working hard (76% CPU capacity) but keeping up. The real problem was the Waiters (API Server)! They were maxed out at ~600% CPU capacity (running as fast as 6 CPU cores would allow). The line backed up because there physically weren't enough waiters to write down the orders.
+
+**The Solution:**
+To serve more customers, we don't need a faster database just yet. We need to hire more waiters (Horizontal Scaling: adding a second API server behind a load balancer).
+
+## Phase 11: Idempotency (Pending)
 *(To be updated when we handle network retries and idempotency keys)*

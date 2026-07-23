@@ -8,6 +8,7 @@ import (
 	"context"
 	"log"
 	"net/http"
+	"net/http/pprof"
 	"os"
 	"os/signal"
 	"syscall"
@@ -21,6 +22,13 @@ func routes(hub *websocket.Hub, svc *booking.Service) *chi.Mux {
 	h := &APIHandler{svc: svc}
 	r := chi.NewRouter()
 	r.Use(middleware.Logger)
+
+	// Profiling endpoints
+	r.HandleFunc("/debug/pprof/", pprof.Index)
+	r.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
+	r.HandleFunc("/debug/pprof/profile", pprof.Profile)
+	r.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
+	r.HandleFunc("/debug/pprof/trace", pprof.Trace)
 
 	r.Get("/healthz", h.healthz)
 	r.Get("/users/{id}/bookings", h.listBookings)
